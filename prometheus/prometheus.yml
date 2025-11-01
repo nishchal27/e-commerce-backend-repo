@@ -1,0 +1,26 @@
+# Prometheus Configuration
+#
+# This file configures Prometheus to scrape metrics from the NestJS application.
+# Prometheus will scrape the /metrics endpoint every 15 seconds.
+
+global:
+  scrape_interval: 15s # Scrape targets every 15 seconds
+  evaluation_interval: 15s # Evaluate rules every 15 seconds
+  external_labels:
+    monitor: 'ecommerce-backend'
+
+# Scrape configurations
+scrape_configs:
+  # Scrape the NestJS application
+  - job_name: 'ecommerce-backend'
+    static_configs:
+      - targets: ['app:3000'] # Service name from docker-compose.yml
+        labels:
+          instance: 'ecommerce-app'
+          environment: 'development'
+
+  # Optional: Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+

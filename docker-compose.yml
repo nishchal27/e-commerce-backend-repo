@@ -1,0 +1,158 @@
+# Docker Compose Configuration
+#
+# This file defines all the services needed to run the e-commerce backend locally:
+# - app: NestJS application
+# - postgres: PostgreSQL database
+# - redis: Redis cache and queue state
+# - prometheus: Prometheus metrics server
+# - grafana: Grafana dashboard (optional, for visualizing metrics)
+#
+# Usage:
+#   docker-compose up -d        # Start all services in background
+#   docker-compose down         # Stop all services
+#   docker-compose logs -f app  # View application logs
+#   docker-compose ps           # Check service status
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ecommerce-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ecommerce_db
+    ports:
+      - '5432:5432'
+    volumes:
+      # Persist database data between container restarts
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce-network
+
+  # Redis Cache and Queue State
+  redis:
+    image: redis:7-alpine
+    container_name: ecommerce-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      # Persist Redis data between container restarts
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce-network
+
+  # NestJS Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce-app
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      # Database connection
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ecommerce_db?schema=public
+      # Redis connection
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Application settings
+      PORT: 3000
+      NODE_ENV: development
+      # JWT (use strong secrets in production)
+      JWT_SECRET: dev-secret-change-in-production
+      JWT_EXPIRES_IN: 3600
+      # Cache settings
+      USE_IN_MEMORY_CACHE: 'true'
+      LRU_CACHE_MAX_SIZE: '100'
+      CACHE_TTL: '3600'
+      # Logging
+      LOG_LEVEL: info
+      LOG_PRETTY: 'true'
+      # Prometheus
+      PROMETHEUS_ENABLED: 'true'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Mount source code for development (hot reload)
+      - ./src:/app/src
+      - ./prisma:/app/prisma
+      # Exclude node_modules from volume mount
+      - /app/node_modules
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:3000/']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus Metrics Server
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ecommerce-prometheus
+    restart: unless-stopped
+    ports:
+      - '9090:9090'
+    volumes:
+      # Prometheus configuration
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      # Persist metrics data
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - ecommerce-network
+
+  # Grafana Dashboard (Optional)
+  # Uncomment to enable Grafana for visualizing Prometheus metrics
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: ecommerce-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - '3001:3000'
+  #   environment:
+  #     GF_SECURITY_ADMIN_USER: admin
+  #     GF_SECURITY_ADMIN_PASSWORD: admin
+  #     GF_SERVER_ROOT_URL: http://localhost:3001
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #   depends_on:
+  #     - prometheus
+  #   networks:
+  #     - ecommerce-network
+
+# Named volumes for data persistence
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  # grafana_data:
+
+# Network for service communication
+networks:
+  ecommerce-network:
+    driver: bridge
+

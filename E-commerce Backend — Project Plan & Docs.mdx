@@ -1,0 +1,367 @@
+---
+
+title: "E-commerce Backend — Project Plan & Docs"
+description: "Design, roadmap, architecture, APIs, DB schema, instrumentation & metrics, observability, security, deployment, and developer checklist for an advanced NestJS e-commerce backend (production-minded)."
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# E-commerce Backend — Project Plan & Docs
+
+> This MDX is the authoritative developer guide for the Advanced E‑commerce Backend project. It outlines the tech stack, architecture, MVP and advanced features, instrumentation and observability plans, DB schemas, recommended algorithms and trade-offs, phases and milestones, CI/CD, and developer checklists.
+
+*Last updated: 2025-11-01*
+
+---
+
+## 1 — Project Vision & Goals
+
+Build a **production-minded, modular, and observable e-commerce backend** using NestJS and TypeScript. The backend should support a real frontend integration (catalog browsing, search, cart & checkout, orders, reviews, recommendations), be easy to extend, and be instrumented for performance experiments and operational monitoring.
+
+**Primary learning outcomes & project value:**
+
+* Real-world backend architecture: stateless API servers, caches, queues, DB, and background workers.
+* Deep understanding of DS/algorithms applied to search, autocomplete, recommendation, and inventory locking.
+* Hands-on experience with instrumentation: metrics, logging, tracing, and load testing.
+* Demonstrable portfolio-ready production code and documentation.
+
+---
+
+## 2 — High-level Requirements & Non-functional Goals
+
+**Functional:**
+
+* User authentication and roles (customer, admin)
+* Product catalog (products, SKUs/variants, attributes) with CRUD
+* Inventory management with reservation and release
+* Cart & checkout with idempotency and simulated payments
+* Orders lifecycle (placed, paid, shipped, delivered, cancelled)
+* Product search & autocomplete
+* Reviews & ratings (comments) with moderation flags
+* Recommendations (tag/popularity hybrid → collaborative → embeddings)
+* Admin endpoints for product & order management
+* Analytics endpoints for frontend dashboards (sales, conversion, recs)
+
+**Non-functional:**
+
+* High observability: Prometheus metrics, structured logs, traces
+* Scalable: stateless API, Redis for state, background workers for heavy tasks
+* Secure: input validation, token-based auth, secret management
+* Testable: unit, integration, and end-to-end tests
+* Deployable: Docker + compose, CI, and readiness for cloud deployment
+
+---
+
+## 3 — Tech Stack (recommended)
+
+* **Language & Framework:** Node.js + NestJS (TypeScript)
+* **ORM/DB:** Prisma + Postgres (primary), optional read-replica(s)
+* **Cache & Queue:** Redis (cache, sessions) + BullMQ (jobs)
+* **Search:** Postgres full-text for MVP; Meilisearch or Elasticsearch later
+* **Metrics & Observability:** Prometheus + Grafana; OpenTelemetry optional
+* **Logging:** Pino (structured JSON logs) or Winston
+* **Testing:** Jest (unit/integration) + supertest for API tests
+* **Load testing:** k6 for performance scenarios
+* **Deployment:** Docker, Docker Compose for local & CI; deploy to Fly/Render/AWS/GCP later
+
+---
+
+## 4 — System Architecture (monolithic → modular)
+
+Start as a modular monolith with clear module boundaries and DI so parts can be extracted later.
+
+**Core modules**:
+
+* `auth` (JWT, refresh, roles)
+* `users`
+* `products` (catalog, attributes, variants)
+* `inventory` (stock, reservations)
+* `cart` (session/cart items)
+* `checkout` (order creation, idempotency keys)
+* `orders` (lifecycle, fulfillment)
+* `search` (full-text + autocomplete)
+* `recommendations` (recommender service)
+* `reviews` (comments, ratings, moderation)
+* `analytics` (metrics ingestion & aggregation)
+* `workers` (background jobs: indexing, email, reconciliation)
+
+**Deployment components**:
+
+* API server(s) (stateless)
+* Postgres (primary) + replicas (optional)
+* Redis (caching, sessions, BullMQ state)
+* Prometheus & Grafana
+* Docker Compose for local dev
+
+**Data flows**:
+
+* Writes: API -> DB -> publish event -> worker (index/update caches)
+* Reads: API -> cache (Redis) -> DB (fallback)
+* Heavy tasks: delegated to workers via BullMQ
+
+---
+
+## 5 — Core Features & APIs (MVP endpoints)
+
+**Auth**
+
+* `POST /auth/register` — create user
+* `POST /auth/login` — issue JWT + refresh
+* `POST /auth/refresh` — refresh tokens
+
+**Products & Catalog**
+
+* `GET /products` — list (filter, cursor pagination)
+* `GET /products/:id` — product details (with variants, stock summary)
+* `POST /products` — create (admin)
+* `PUT /products/:id` — update (admin)
+* `DELETE /products/:id` — delete (admin)
+
+**Inventory**
+
+* `POST /inventory/reserve` — reserve SKUs for checkout (idempotent)
+* `POST /inventory/release` — release reservations
+
+**Cart & Checkout**
+
+* `POST /cart` — create/update cart
+* `GET /cart` — get cart
+* `POST /checkout` — initiate checkout (idempotency support)
+
+**Orders**
+
+* `GET /orders` — list user orders
+* `GET /orders/:id` — get order
+* `POST /orders/:id/cancel` — cancel order
+
+**Search & Autocomplete**
+
+* `GET /search?q=&filters=` — full-text + facets
+* `GET /autocomplete?q=` — prefix search suggestions
+
+**Reviews & Ratings**
+
+* `POST /products/:id/reviews` — add review
+* `GET /products/:id/reviews` — list reviews
+
+**Recommendations**
+
+* `GET /products/:id/recommendations?k=10` — product recs
+
+**Analytics / Metrics**
+
+* `GET /metrics` — aggregated metrics for frontend dashboard (protected)
+
+Each endpoint should emit metrics (timers, status) and use request-id tracing.
+
+---
+
+## 6 — DB Schema (high-level)
+
+**products**
+
+* id UUID PK
+* slug VARCHAR UNIQUE
+* title TEXT
+* description TEXT
+* category_id UUID
+* created_at, updated_at
+
+**product_variants (skus)**
+
+* id UUID PK
+* product_id FK
+* sku VARCHAR UNIQUE
+* price NUMERIC
+* currency VARCHAR
+* attributes JSONB (size, color, etc.)
+* stock INT
+
+**inventory_reservations**
+
+* id UUID
+* sku_id FK
+* quantity INT
+* reserved_by (order_id or session)
+* status: reserved/released/consumed
+* expires_at TIMESTAMP
+
+**users**
+
+* id UUID
+* email
+* hashed_password
+* role
+
+**orders**
+
+* id UUID
+* user_id FK
+* total_amount NUMERIC
+* status ENUM (created, paid, shipped, delivered, cancelled)
+* idempotency_key VARCHAR
+
+**reviews**
+
+* id UUID
+* product_id FK
+* user_id FK
+* rating INT
+* comment TEXT
+* created_at
+
+**post_metrics / analytics tables**
+
+* store aggregated daily metrics: sales, conversion, recs impressions, recs clicks, cache hit rates
+
+---
+
+## 7 — Algorithms & Data Structures (where to apply)
+
+* **LRU Cache (map + doubly linked list)** — product detail caching in memory (dev) and Redis for production.
+* **Trie** — autocomplete index (in-memory small suggestions or external search service)
+* **Inverted index / Full-text** — Postgres or Meilisearch for product search
+* **Priority queue (heap)** — job prioritization in workers
+* **Reservation algorithms (locking)** — optimistic vs pessimistic lock strategies for stock
+* **Recommendation algorithms** — tag/popularity hybrid, co-occurrence collaborative filtering, embeddings + ANN for semantic similarity
+
+---
+
+## 8 — Instrumentation & Metrics Plan
+
+**System metrics (Prometheus):**
+
+* `http_requests_total{route,method,status}`
+* `http_request_duration_seconds` (histogram)
+* `process_cpu_seconds_total`, `process_resident_memory_bytes`
+* `db_query_duration_seconds` (histogram)
+* `cache_hits_total`, `cache_misses_total`
+* `bullmq_jobs_processed_total`, `bullmq_job_duration_seconds`
+
+**Business & analytical metrics (persisted in Postgres):**
+
+* daily_sales, daily_orders
+* checkout_abandonment_rate
+* recs_impressions, recs_clicks (CTR)
+* top_products_by_views, stockouts
+
+**Tracing & Logs**
+
+* Add request-id to all logs
+* Structured logs (Pino) with log-levels and JSON fields
+* Optional: add OpenTelemetry spans for critical flows (checkout)
+
+**Experiment tracking**
+
+* `experiments` table to persist what changed and before/after metrics
+* cron or worker to aggregate Prometheus data and persist selected KPIs to Postgres for frontend consumption
+
+---
+
+## 9 — Caching & Consistency Patterns
+
+* **Read-through cache** for product details: check Redis → DB → set cache
+* **Write-through / invalidate on write**: when product/stock updates, invalidate cache entries
+* **Reservation TTLs**: reservations expire after X minutes via background job or Redis TTL
+* **CQRS read model**: consider denormalized read tables (e.g., `product_listings`) for high-performance reads
+
+---
+
+## 10 — Queueing & Background Workers
+
+Use BullMQ + Redis for:
+
+* Indexing products for search
+* Sending transactional emails
+* Processing payments / reconciliation (simulate)
+* Recomputing recommendations for hot products
+* Periodic aggregation of metrics into Postgres
+
+Workers should expose health checks and metrics (jobs processed, backlog, failures).
+
+---
+
+## 11 — Security & Compliance
+
+* Never store raw payment data. Use Stripe tokens for payments (simulate in MVP).
+* Use HTTPS (TLS) in production.
+* Hash passwords with bcrypt/argon2 and rotate salts on schedule.
+* Role-based access control for admin endpoints.
+* Rate limit sensitive endpoints (login, checkout) per IP & per user.
+* Input validation and sanitization using `class-validator`.
+
+---
+
+## 12 — Testing Strategy
+
+* **Unit tests** for services and algorithms (LRU, Trie, recommender).
+* **Integration tests** for controllers with an in-memory DB or test Postgres (Docker). Use `supertest`.
+* **End-to-end tests** for checkout flow (simulate payment) and inventory reservation.
+* **Performance tests** (k6) for critical endpoints: `GET /products/:id`, `POST /checkout`, `/search`.
+* **Regression tests** for experiments (ensure metrics don't regress beyond threshold).
+
+---
+
+## 13 — CI/CD & DevOps
+
+* **CI pipeline**: lint, run unit & integration tests, build Docker image, run a quick smoke k6 test (optional), then deploy to staging.
+* **Deployment**: containerize app and use managed Postgres & Redis. Start with a single-region deployment.
+* **Rollbacks & feature flags**: use feature flags (env or LaunchDarkly) to toggle experimental features.
+
+---
+
+## 14 — Phased Roadmap (12 weeks, suggested)
+
+**Week 0**: Project scaffold (NestJS), Docker Compose (Postgres, Redis, Prometheus), basic README
+
+**Week 1**: Auth, Users, Products CRUD, Prisma schema, unit tests
+
+**Week 2**: Product detail endpoint + naive DB read; implement LRU cache and measure baseline; add Prometheus middleware
+
+**Week 3**: Cart, inventory reservation primitives, idempotent checkout stub (simulate payment)
+
+**Week 4**: Orders lifecycle, basic reviews CRUD, product metrics (views, likes)
+
+**Week 5**: Search (Postgres FT), autocomplete (Trie or suggestions), instrument search metrics
+
+**Week 6**: Background worker + BullMQ for indexing & email; precompute recs for hot products
+
+**Week 7**: Recommendations basic (tag+popularity); /products/:id/recommendations endpoint; record CTR metric
+
+**Week 8**: Redis cache layer (replace in-memory), cache invalidation on writes, experiment LRU vs Redis
+
+**Week 9**: Load tests (k6), profile hotspots, DB indexes + query optimizations
+
+**Week 10**: Add advanced features (promotions, coupons) and edge-case testing
+
+**Week 11**: Observability polishing (Grafana dashboards, alerts), experiments log
+
+**Week 12**: Cleanup, documentation, create demo frontend or Postman collection, prepare portfolio README
+
+---
+
+## 15 — Developer Checklist (Immediate Actions)
+
+1. Scaffold Nest project with modules: auth, products, inventory, cart, orders, reviews, recommendations
+2. Add Prisma + basic Postgres schema & migrations
+3. Add Prometheus middleware and expose `/metrics`
+4. Implement `GET /products/:id` with naive DB and then wire LRU cache
+5. Add Docker Compose: app, postgres, redis, prometheus, grafana (optional)
+6. Add structured logging (Pino) and request-id middleware
+7. Add BullMQ worker and demo job (index product)
+8. Add k6 script for `GET /products/:id` and baseline run
+9. Add `experiments` table and a small script to persist results
+10. Write README & MDX docs (this doc)
+
+---
+
+## 16 — What I can generate for you next (pick one)
+
+* **A.** Full scaffold files: `package.json`, `tsconfig.json`, `main.ts`, `app.module.ts`, `products` module controller/service, LRU class, Prometheus middleware, Docker Compose file (Postgres + Redis + Prometheus) — ready to paste.
+* **B.** Week-by-week task list with exact commands and acceptance criteria in MDX format.
+* **C.** k6 scripts & instructions for load testing `GET /products/:id` baseline and cached runs.
+* **D.** Recommendations module scaffold (tag+popularity) + impression/click endpoints + schema and worker to collect CTR.
+
+Choose which generator you want next and I will create the files and code for you immediately.
+
+---
+
+*End of document.*

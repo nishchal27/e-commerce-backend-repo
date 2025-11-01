@@ -1,0 +1,464 @@
+{
+  "info": {
+    "name": "Ecom-Dev",
+    "_postman_id": "ecom-dev-collection-0001",
+    "description": "Starter Postman collection for the Advanced E-commerce Backend (Dev). Includes auth, products, inventory, checkout, reviews, recommendations and metrics checks. Uses {{baseUrl}} and env variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Authentication requests",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"name\": \"Alice\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth","register"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"status is 201 or 200\", () => pm.response.to.have.status(201) || pm.response.to.have.status(200));",
+                  "try {",
+                  "  const body = pm.response.json();",
+                  "  if (body?.token) pm.environment.set(\"authToken\", body.token);",
+                  "  if (body?.id) pm.environment.set(\"userId\", body.id);",
+                  "} catch (e) {}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth","login"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"login success\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.token) pm.environment.set(\"authToken\", body.token);",
+                  "if (body.user?.id) pm.environment.set(\"userId\", body.user.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "Create product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Acme T-Shirt\",\n  \"description\": \"A comfy t-shirt\",\n  \"slug\": \"acme-tshirt-{{Math.floor(Math.random()*1000)}}\",\n  \"price\": 1999,\n  \"currency\": \"INR\",\n  \"tags\": [\"clothing\",\"tshirt\",\"acme\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"created product\", () => pm.response.to.have.status(201) || pm.response.to.have.status(200));",
+                  "try {",
+                  "  const body = pm.response.json();",
+                  "  if (body.id) pm.environment.set(\"productId\", body.id);",
+                  "} catch (e) {}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get product",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["products","{{productId}}"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"get product ok\", () => pm.response.to.have.status(200));",
+                  "try {",
+                  "  const body = pm.response.json();",
+                  "  if (body.id) pm.environment.set(\"productId\", body.id);",
+                  "  // Save response time & source if available",
+                  "  pm.environment.set('lastGetDuration', pm.response.responseTime);",
+                  "  if (body.source) pm.environment.set('lastSource', body.source);",
+                  "} catch (e) {}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/search?q=acme",
+              "host": ["{{baseUrl}}"],
+              "path": ["search"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "acme"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"search ok\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"returns array\", () => Array.isArray(pm.response.json()));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Inventory & Cart",
+      "item": [
+        {
+          "name": "Reserve inventory",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"skuId\": \"{{productId}}\",\n  \"quantity\": 1,\n  \"idempotencyKey\": \"{{idempotencyKey}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/reserve",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory","reserve"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (!pm.environment.get('idempotencyKey')) {",
+                  "  pm.environment.set('idempotencyKey', Math.random().toString(36).slice(2));",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"reserve success\", () => pm.response.to.have.status(200) || pm.response.to.have.status(201));",
+                  "try {",
+                  "  const body = pm.response.json();",
+                  "  if (body.reservationId) pm.environment.set('reservationId', body.reservationId);",
+                  "} catch (e) {}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Checkout & Orders",
+      "item": [
+        {
+          "name": "Checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cart\": [{ \"skuId\": \"{{productId}}\", \"quantity\": 1 }],\n  \"paymentMethod\": \"test\",\n  \"idempotencyKey\": \"{{idempotencyKey}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/checkout",
+              "host": ["{{baseUrl}}"],
+              "path": ["checkout"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"checkout success\", () => pm.response.to.have.status(200) || pm.response.to.have.status(201));",
+                  "try {",
+                  "  const body = pm.response.json();",
+                  "  if (body.orderId) pm.environment.set('orderId', body.orderId);",
+                  "} catch (e) {}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Reviews",
+      "item": [
+        {
+          "name": "Post review",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Great product!\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}/reviews",
+              "host": ["{{baseUrl}}"],
+              "path": ["products","{{productId}}","reviews"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"review created\", () => pm.response.to.have.status(201) || pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recommendations",
+      "item": [
+        {
+          "name": "Get product recommendations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}/recommendations?k=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["products","{{productId}}","recommendations"],
+              "query": [
+                {
+                  "key": "k",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"recommendations ok\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"array returned\", () => Array.isArray(body.items || body));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Metrics & Experiments",
+      "item": [
+        {
+          "name": "Get /metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["metrics"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"metrics endpoint up\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"content-type is text/plain\", () => pm.response.headers.get('Content-Type').includes('text/plain'));",
+                  "const text = pm.response.text();",
+                  "pm.test(\"contains http_requests_total or duration\", () => text.includes('http_requests_total') || text.includes('http_request_duration_seconds'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report experiment (save to backend)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"LRU-cache-baseline\",\n  \"metricsBefore\": { \"p50\": 150, \"p95\": 300 },\n  \"metricsAfter\": { \"p50\": 40, \"p95\": 120 },\n  \"notes\": \"example report from Postman smoke test\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/experiments/report",
+              "host": ["{{baseUrl}}"],
+              "path": ["experiments","report"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"report accepted 2xx\", () => pm.response.to.have.status(200) || pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Smoke Tests",
+      "description": "Run these in order (collection runner) to validate core flows and cache behaviour",
+      "item": [
+        { "name": "Register", "request": { "url": { "raw": "{{baseUrl}}/auth/register" }, "method": "POST" } },
+        { "name": "Login", "request": { "url": { "raw": "{{baseUrl}}/auth/login" }, "method": "POST" } },
+        { "name": "Create product", "request": { "url": { "raw": "{{baseUrl}}/products" }, "method": "POST" } },
+        { "name": "Get product (1st)", "request": { "url": { "raw": "{{baseUrl}}/products/{{productId}}" }, "method": "GET" } },
+        { "name": "Get product (2nd)", "request": { "url": { "raw": "{{baseUrl}}/products/{{productId}}" }, "method": "GET" } },
+        { "name": "Post review", "request": { "url": { "raw": "{{baseUrl}}/products/{{productId}}/reviews" }, "method": "POST" } },
+        { "name": "Get product recommendations", "request": { "url": { "raw": "{{baseUrl}}/products/{{productId}}/recommendations?k=5" }, "method": "GET" } },
+        { "name": "Get /metrics", "request": { "url": { "raw": "{{baseUrl}}/metrics" }, "method": "GET" } }
+      ]
+    }
+  ],
+  "event": []
+}

@@ -1,0 +1,177 @@
+// Prisma Schema File
+//
+// This file defines the database schema using Prisma's schema language.
+// Run `npm run prisma:generate` to generate Prisma Client from this schema.
+// Run `npm run prisma:migrate` to create and apply database migrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model for authentication and authorization
+// Supports roles: customer, admin
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // Hashed password (bcrypt)
+  role      UserRole @default(CUSTOMER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  orders Order[]
+  reviews Review[]
+
+  @@map("users")
+}
+
+// User roles enum
+enum UserRole {
+  CUSTOMER
+  ADMIN
+}
+
+// Product model - represents a product in the catalog
+// A product can have multiple variants (different sizes, colors, etc.)
+model Product {
+  id          String   @id @default(uuid())
+  slug        String   @unique // SEO-friendly URL slug
+  title       String
+  description String?  @db.Text
+  categoryId  String?  // Optional category reference (can be expanded later)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  variants ProductVariant[]
+  reviews  Review[]
+
+  @@index([slug]) // Index for fast slug lookups
+  @@index([categoryId])
+  @@map("products")
+}
+
+// Product variant model - represents different SKUs/variants of a product
+// Example: A T-shirt product might have variants for Small/Medium/Large and Red/Blue colors
+model ProductVariant {
+  id         String   @id @default(uuid())
+  productId  String
+  sku        String   @unique // Stock Keeping Unit (unique identifier for inventory)
+  price      Decimal  @db.Decimal(10, 2) // Price in cents
+  currency   String   @default("USD")
+  attributes Json?    // Flexible JSONB field for variant attributes (size, color, etc.)
+  stock      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  product             Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  inventoryReservations InventoryReservation[]
+
+  @@index([productId])
+  @@index([sku])
+  @@map("product_variants")
+}
+
+// Inventory reservation model - tracks reserved stock for checkout
+// Prevents overselling by reserving inventory during checkout process
+model InventoryReservation {
+  id        String                  @id @default(uuid())
+  skuId     String
+  quantity  Int
+  reservedBy String                 // Order ID or session ID
+  status    InventoryReservationStatus @default(RESERVED)
+  expiresAt DateTime                // Reservation expiration time
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
+
+  // Relations
+  productVariant ProductVariant @relation(fields: [skuId], references: [id], onDelete: Cascade)
+
+  @@index([skuId])
+  @@index([reservedBy])
+  @@index([status])
+  @@index([expiresAt]) // For finding expired reservations
+  @@map("inventory_reservations")
+}
+
+// Inventory reservation status enum
+enum InventoryReservationStatus {
+  RESERVED  // Stock is reserved but not yet consumed
+  RELEASED  // Reservation was released (cart abandoned, checkout cancelled)
+  CONSUMED  // Reservation was consumed (order placed and paid)
+}
+
+// Order model - represents a customer order
+model Order {
+  id             String      @id @default(uuid())
+  userId         String
+  totalAmount    Decimal     @db.Decimal(10, 2)
+  status         OrderStatus @default(CREATED)
+  idempotencyKey String?     @unique // Prevents duplicate order creation
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([idempotencyKey])
+  @@map("orders")
+}
+
+// Order status enum
+enum OrderStatus {
+  CREATED   // Order created but payment not yet processed
+  PAID      // Payment processed successfully
+  SHIPPED   // Order shipped to customer
+  DELIVERED // Order delivered to customer
+  CANCELLED // Order cancelled
+}
+
+// Review model - customer reviews and ratings for products
+model Review {
+  id        String   @id @default(uuid())
+  productId String
+  userId    String
+  rating    Int      // Rating from 1 to 5
+  comment   String?  @db.Text
+  moderated Boolean  @default(false) // Flag for content moderation
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([userId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+// Experiment model - tracks A/B tests and performance experiments
+// Used to persist experiment results for frontend analytics dashboard
+model Experiment {
+  id          String   @id @default(uuid())
+  name        String   // Experiment name (e.g., "lru_cache_vs_redis")
+  description String?  @db.Text
+  variant     String   // Variant name (e.g., "baseline", "with_cache")
+  metric      String   // Metric name (e.g., "avg_response_time", "cache_hit_rate")
+  value       Decimal  @db.Decimal(10, 4) // Metric value
+  metadata    Json?    // Additional experiment metadata
+  createdAt   DateTime @default(now())
+
+  @@index([name])
+  @@index([variant])
+  @@index([metric])
+  @@index([createdAt])
+  @@map("experiments")
+}
+
