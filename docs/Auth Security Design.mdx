@@ -1,0 +1,809 @@
+# 🔐 Authentication & Security Design — E-commerce Backend
+
+> **Tech Stack:** NestJS · PostgreSQL · Redis · TypeScript · Docker · Prometheus · Pino · BullMQ
+
+---
+
+## 📋 Table of Contents
+
+1. [Overview](#-overview)
+2. [Design Decisions](#-design-decisions)
+3. [Database Schema](#-database-schema)
+4. [Architecture & Components](#️-architecture--components)
+5. [Security Specifications](#-security-specifications)
+6. [Email Infrastructure](#-email-infrastructure)
+7. [Rate Limiting](#-rate-limiting)
+8. [Implementation Plan](#-implementation-plan)
+9. [Integration Points](#-integration-points)
+10. [Testing Strategy](#-testing-strategy)
+11. [Future Extensions](#-future-extensions)
+
+---
+
+## 🧭 Overview
+
+This document defines the **authentication and security strategy** for our production-grade **E-commerce backend**. The system follows **enterprise-level security practices** and integrates seamlessly into the NestJS modular architecture, supporting **scalability**, **observability**, and **maintainability** from day one.
+
+### 🎯 Goals
+
+- ✅ **Security-First**: Industry-standard practices (JWT + Refresh Tokens, bcrypt, rate limiting)
+- ✅ **Developer-Friendly**: Clear patterns, modular structure, comprehensive documentation
+- ✅ **Production-Ready**: Observability (Prometheus), logging (Pino), error handling
+- ✅ **Scalable**: Stateless design, Redis-backed, distributed rate limiting
+
+---
+
+## 🎨 Design Decisions
+
+### ⚙️ Authentication Type
+
+**JWT-based Authentication with Refresh Tokens** — the industry standard for stateless APIs.
+
+#### Why JWT?
+
+| Aspect | Benefit |
+|--------|---------|
+| 🔁 **Stateless** | No server-side session storage required |
+| 📈 **Scalable** | Works across multiple server instances |
+| 🔐 **Secure** | Refresh token rotation prevents token reuse attacks |
+| 🧩 **Compatible** | Perfect for microservices and frontend clients |
+
+### 🔑 Token Strategy
+
+| Token Type | Storage Location | Expiry | Purpose | Security |
+|------------|------------------|--------|---------|----------|
+| **Access Token** | In-memory / HTTP Header (`Authorization: Bearer <token>`) | 15m–1h | Authenticate API requests | Short-lived, stateless |
+| **Refresh Token** | HttpOnly Cookie (secure, sameSite) | 7–30 days | Obtain new access tokens | Rotated on each use, stored hashed in DB |
+
+### 🔒 Refresh Token Security Decision
+
+**✅ Store HMAC-SHA256 hash of refresh tokens** (not plaintext)
+
+**Rationale:**
+- ⚡ **Fast**: HMAC is O(1) and adds negligible latency (< 1ms per refresh)
+- 🔐 **Secure**: If DB leaks, attackers only get hashes (not usable tokens)
+- 🎯 **Best Practice**: Industry standard for token storage
+
+**Implementation:**
+```typescript
+// Hash token before storing
+const tokenHash = crypto.createHmac('sha256', HMAC_SECRET)
+  .update(refreshToken)
+  .digest('hex');
+
+// Lookup by hash
+const storedHash = crypto.createHmac('sha256', HMAC_SECRET)
+  .update(presentedToken)
+  .digest('hex');
+```
+
+**Performance Note:** HMAC is cheap; Argon2 would add CPU cost to every refresh request.
+
+---
+
+## 🧱 Database Schema
+
+### Prisma Models
+
+```prisma
+model User {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  password       String   // Hashed with bcrypt (12 rounds)
+  name           String?
+  role           UserRole @default(CUSTOMER)
+  isEmailVerified Boolean @default(false)
+  refreshTokens  RefreshToken[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique // HMAC-SHA256 hash of token
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt]) // For cleanup of expired tokens
+  @@map("refresh_tokens")
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  MANAGER // Future: inventory/order management
+}
+```
+
+### 🔄 Schema Changes Required
+
+1. **Update User model**:
+   - Add `isEmailVerified` field
+   - Update role to enum (`UserRole`)
+   - Rename `isVerified` → `isEmailVerified` (clearer naming)
+
+2. **Update RefreshToken model**:
+   - Rename `token` → `tokenHash` (stores HMAC hash, not plaintext)
+   - Add indexes for performance
+
+3. **Migration**: Create migration to update existing schema (if any)
+
+---
+
+## 🏗️ Architecture & Components
+
+### 📁 Module Structure
+
+```
+/src
+ ├── modules
+ │    └── auth
+ │         ├── auth.module.ts              # Root auth module
+ │         ├── auth.controller.ts          # HTTP endpoints
+ │         ├── auth.service.ts             # Business logic
+ │         │
+ │         ├── strategies/
+ │         │    ├── jwt.strategy.ts        # Access token validation
+ │         │    └── refresh.strategy.ts    # Refresh token validation
+ │         │
+ │         ├── guards/
+ │         │    ├── jwt-auth.guard.ts      # Protect routes (use access token)
+ │         │    └── roles.guard.ts         # RBAC enforcement
+ │         │
+ │         ├── decorators/
+ │         │    ├── public.decorator.ts    # Mark routes as public
+ │         │    ├── roles.decorator.ts     # Specify required roles
+ │         │    └── current-user.decorator.ts  # Extract user from request
+ │         │
+ │         ├── dto/
+ │         │    ├── register.dto.ts        # Registration request
+ │         │    ├── login.dto.ts           # Login request
+ │         │    ├── refresh.dto.ts         # Refresh request (no body, uses cookie)
+ │         │    ├── verify-email.dto.ts    # Email verification request
+ │         │    └── password-reset.dto.ts  # Password reset request
+ │         │
+ │         ├── interfaces/
+ │         │    ├── jwt-payload.interface.ts
+ │         │    └── token-pair.interface.ts
+ │         │
+ │         └── utils/
+ │              └── token.util.ts          # Token generation & validation helpers
+ │
+ ├── modules
+ │    └── mailer                            # NEW: Email infrastructure module
+ │         ├── mailer.module.ts
+ │         ├── mailer.service.ts
+ │         ├── templates/
+ │         │    ├── verification.hbs
+ │         │    ├── password-reset.hbs
+ │         │    └── welcome.hbs
+ │         └── processors/
+ │              └── mail.processor.ts      # BullMQ worker for async email sending
+ │
+ └── common
+      └── rate-limiting/
+           ├── rate-limit.module.ts        # NEW: Rate limiting module
+           ├── rate-limit.guard.ts         # Rate limiting guard
+           └── rate-limit.service.ts       # Redis-backed rate limiting
+```
+
+### 🔧 Key Components
+
+| Component | Responsibility | Dependencies |
+|-----------|---------------|--------------|
+| **AuthService** | Registration, login, token generation, password hashing | PrismaService, JwtService, MailerService |
+| **JwtStrategy** | Validates access token on each authenticated request | Passport, JWT |
+| **RefreshStrategy** | Validates refresh token, handles rotation | Passport, PrismaService |
+| **JwtAuthGuard** | Protects routes, extracts user from JWT | JwtStrategy |
+| **RolesGuard** | Enforces role-based access control | Reflector, JwtAuthGuard |
+| **MailerService** | Sends transactional emails (verification, password reset) | BullMQ, Handlebars |
+| **RateLimitGuard** | Enforces rate limits on endpoints | Redis, rate-limiter-flexible |
+
+---
+
+## 🔐 Security Specifications
+
+### 🔒 Password Security
+
+| Aspect | Specification |
+|--------|--------------|
+| **Hashing Algorithm** | `bcrypt` (12–14 rounds) |
+| **Salt** | Automatic (bcrypt handles salting) |
+| **Validation** | Minimum 8 characters, complexity recommended (but not enforced) |
+| **Reset Flow** | Signed JWT token, 1-hour expiry, single-use |
+
+### 🎫 Token Security
+
+| Token Type | Algorithm | Secret | Expiry | Rotation |
+|------------|-----------|--------|--------|----------|
+| **Access Token** | HS256 | `JWT_SECRET` (env var) | 15m–1h (configurable) | No |
+| **Refresh Token** | Random UUID | N/A | 7–30 days (configurable) | ✅ Yes (on each refresh) |
+| **Email Verification** | Signed JWT | `JWT_SECRET` | 24 hours | No |
+| **Password Reset** | Signed JWT | `JWT_SECRET` | 1 hour | Single-use |
+
+### 🛡️ API Security
+
+| Layer | Implementation |
+|-------|----------------|
+| **Rate Limiting** | Redis-backed, per-IP and per-user (see [Rate Limiting](#-rate-limiting)) |
+| **Route Protection** | `@UseGuards(JwtAuthGuard)` by default, `@Public()` for public routes |
+| **CSRF Protection** | SameSite cookies + state tokens for sensitive operations |
+| **Input Validation** | `class-validator` DTOs, automatic validation via `ValidationPipe` |
+| **SQL Injection** | Prisma ORM (parameterized queries) |
+| **XSS Protection** | Input sanitization + secure headers |
+
+### 🧾 Transport Security
+
+- ✅ **HTTPS Only** (in production, enforced via reverse proxy/LB)
+- ✅ **Secure Cookies**: `httpOnly: true`, `secure: true` (production), `sameSite: 'strict'`
+- ✅ **Security Headers**: Helmet.js middleware (future addition)
+
+### 🕵️ Logging & Monitoring
+
+| Component | Tool | Purpose |
+|-----------|------|---------|
+| **Structured Logging** | **Pino** (not Winston) | Auth events, failures, token reuse attempts |
+| **Metrics** | **Prometheus** | Login attempts, failed logins, token refresh counts, rate limit blocks |
+| **Request Tracing** | Request ID middleware | Track auth flows across services |
+
+**Why Pino?** Faster, lower latency, better for high-throughput e-commerce workloads. Structured JSON logs work seamlessly with observability pipelines.
+
+---
+
+## 📧 Email Infrastructure
+
+### 🎯 Purpose
+
+Email infrastructure serves **both auth and transactional** use cases:
+- **Auth**: Email verification, password reset, security alerts
+- **Transactional**: Order confirmations, shipping notifications (future)
+
+### 🏗️ Architecture
+
+**Single reusable mailer module** used across the application.
+
+```
+MailerModule
+  ├── MailerService (synchronous interface)
+  ├── BullMQ Queue (async processing)
+  ├── MailProcessor (worker, handles retries)
+  ├── Template Engine (Handlebars)
+  └── Provider Abstraction (Ethereal/MailHog/SendGrid)
+```
+
+### 📋 Email Types (MVP)
+
+| Email Type | Trigger | Template | Queue Priority |
+|------------|---------|----------|----------------|
+| **Verification** | User registration | `verification.hbs` | High |
+| **Password Reset** | User requests reset | `password-reset.hbs` | High |
+| **Welcome** | Email verified | `welcome.hbs` | Normal |
+| **Security Alert** | Password changed, suspicious login | `security-alert.hbs` | High |
+
+### 🔧 Provider Strategy
+
+| Environment | Provider | Configuration | Reason |
+|-------------|----------|---------------|--------|
+| **Development** | Ethereal / MailHog | Local SMTP | Fast feedback, zero cost, no deliverability concerns |
+| **Staging/Production** | SendGrid / Postmark / Mailgun | API key | Good deliverability, webhooks, free/low-tier available |
+
+### ⚙️ Environment Variables
+
+```bash
+# Mailer Configuration
+MAILER_DRIVER=ethereal  # ethereal | smtp | sendgrid | postmark | ses
+SMTP_HOST=localhost
+SMTP_PORT=1025
+SMTP_USER=
+SMTP_PASS=
+
+# Provider-specific (example for SendGrid)
+SENDGRID_API_KEY=
+
+# Email Settings
+FROM_EMAIL="no-reply@yourdomain.com"
+FROM_NAME="YourShop"
+
+# Queue (reuses Redis)
+BULLMQ_REDIS_URL="redis://localhost:6379"
+```
+
+### 📦 Required Dependencies
+
+```json
+{
+  "dependencies": {
+    "@nestjs/bullmq": "^10.0.1",  // Already installed
+    "bullmq": "^5.3.0",            // Already installed
+    "handlebars": "^4.7.8",        // Template engine
+    "nodemailer": "^6.9.7",        // SMTP client
+    "@sendgrid/mail": "^7.7.0"     // Optional: SendGrid provider
+  }
+}
+```
+
+### 🔐 Email Security
+
+- **Signed Tokens**: Verification/reset tokens are signed JWTs (not guessable)
+- **Short Expiry**: Verification (24h), Password Reset (1h)
+- **Rate Limiting**: Limit email send requests (see [Rate Limiting](#-rate-limiting))
+- **Single-Use**: Password reset tokens invalidated after use
+
+---
+
+## ⏱️ Rate Limiting
+
+### 📊 Rate Limits (Default Values)
+
+| Endpoint | Limit | Window | Key | Action on Exceed |
+|----------|-------|--------|-----|------------------|
+| **Login** | 5 requests | 1 minute | IP + Email | Return 429, block 15 minutes |
+| **Refresh** | 30 requests | 1 minute | IP + Token | Return 429 |
+| **Register** | 3 requests | 1 hour | IP | Return 429 |
+| **Password Reset** | 3 requests | 1 hour | IP + Email | Return 429 |
+| **Email Verification** | 5 requests | 1 hour | IP + Email | Return 429 |
+| **General API** | 100 requests | 1 minute | IP | Return 429 |
+
+### ⚙️ Configuration
+
+**Environment Variables:**
+
+```bash
+# Rate Limiting (Redis-backed)
+RATE_LIMIT_LOGIN_PER_MIN=5
+RATE_LIMIT_REFRESH_PER_MIN=30
+RATE_LIMIT_REGISTER_PER_HR=3
+RATE_LIMIT_PASSWORD_RESET_PER_HR=3
+RATE_LIMIT_EMAIL_VERIFY_PER_HR=5
+RATE_LIMIT_GENERAL_PER_MIN=100
+RATE_LIMIT_REDIS_URL=redis://localhost:6379  # Optional: separate Redis instance
+```
+
+**Implementation:** Use `rate-limiter-flexible` package (Redis-backed, distributed, supports sliding window).
+
+### 📦 Required Dependencies
+
+```json
+{
+  "dependencies": {
+    "rate-limiter-flexible": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/rate-limiter-flexible": "^2.0.4"
+  }
+}
+```
+
+---
+
+## 🚀 Implementation Plan
+
+### 📋 Prerequisites
+
+Before starting implementation, ensure:
+- ✅ Prisma schema is updated with User and RefreshToken models
+- ✅ Redis is running and accessible
+- ✅ Environment variables are configured (see `env.example`)
+- ✅ Dependencies are installed (JWT, Passport, bcrypt, etc.)
+
+---
+
+### 🎯 Phase 1: Core Infrastructure (Foundation)
+
+**Goal:** Set up database, basic services, and utilities.
+
+#### 1.1 Database Schema & Migration
+- [ ] Update Prisma schema with User and RefreshToken models
+- [ ] Add indexes for performance (userId, tokenHash, expiresAt)
+- [ ] Create and run migration
+- [ ] Update seed script to include sample users (optional)
+
+**Files to create/modify:**
+- `prisma/schema.prisma`
+- `prisma/migrations/*`
+
+#### 1.2 Token Utilities
+- [ ] Create `auth/utils/token.util.ts` with:
+  - `generateAccessToken()` - JWT generation
+  - `generateRefreshToken()` - UUID generation
+  - `hashRefreshToken()` - HMAC-SHA256 hashing
+  - `verifyRefreshToken()` - Hash comparison
+
+**Files to create:**
+- `src/modules/auth/utils/token.util.ts`
+
+#### 1.3 Interfaces & Types
+- [ ] Create `auth/interfaces/jwt-payload.interface.ts`
+- [ ] Create `auth/interfaces/token-pair.interface.ts`
+- [ ] Create `auth/interfaces/refresh-token-payload.interface.ts`
+
+**Files to create:**
+- `src/modules/auth/interfaces/jwt-payload.interface.ts`
+- `src/modules/auth/interfaces/token-pair.interface.ts`
+- `src/modules/auth/interfaces/refresh-token-payload.interface.ts`
+
+---
+
+### 🎯 Phase 2: Authentication Core (MVP)
+
+**Goal:** Implement registration, login, and token refresh flows.
+
+#### 2.1 DTOs & Validation
+- [ ] Create `dto/register.dto.ts` (email, password, name)
+- [ ] Create `dto/login.dto.ts` (email, password)
+- [ ] Create `dto/refresh.dto.ts` (optional: no body, uses cookie)
+- [ ] Add validation decorators (`@IsEmail()`, `@MinLength()`, etc.)
+
+**Files to create:**
+- `src/modules/auth/dto/register.dto.ts`
+- `src/modules/auth/dto/login.dto.ts`
+- `src/modules/auth/dto/refresh.dto.ts`
+
+#### 2.2 Auth Service (Business Logic)
+- [ ] Implement `register()` - hash password, create user, return tokens
+- [ ] Implement `login()` - validate credentials, generate tokens
+- [ ] Implement `refresh()` - validate refresh token, rotate, return new access token
+- [ ] Implement `logout()` - invalidate refresh token
+- [ ] Implement `validateUser()` - used by Passport strategies
+
+**Files to create:**
+- `src/modules/auth/auth.service.ts`
+
+#### 2.3 Passport Strategies
+- [ ] Create `strategies/jwt.strategy.ts` - validates access token
+- [ ] Create `strategies/refresh.strategy.ts` - validates refresh token from cookie
+
+**Files to create:**
+- `src/modules/auth/strategies/jwt.strategy.ts`
+- `src/modules/auth/strategies/refresh.strategy.ts`
+
+#### 2.4 Guards & Decorators
+- [ ] Create `guards/jwt-auth.guard.ts` - protects routes
+- [ ] Create `guards/roles.guard.ts` - enforces RBAC
+- [ ] Create `decorators/public.decorator.ts` - marks public routes
+- [ ] Create `decorators/roles.decorator.ts` - specifies required roles
+- [ ] Create `decorators/current-user.decorator.ts` - extracts user from request
+
+**Files to create:**
+- `src/modules/auth/guards/jwt-auth.guard.ts`
+- `src/modules/auth/guards/roles.guard.ts`
+- `src/modules/auth/decorators/public.decorator.ts`
+- `src/modules/auth/decorators/roles.decorator.ts`
+- `src/modules/auth/decorators/current-user.decorator.ts`
+
+#### 2.5 Controller & Routes
+- [ ] Create `auth.controller.ts` with endpoints:
+  - `POST /auth/register` - Public
+  - `POST /auth/login` - Public
+  - `POST /auth/refresh` - Public (uses cookie)
+  - `POST /auth/logout` - Protected
+  - `GET /auth/me` - Protected (returns current user)
+
+**Files to create:**
+- `src/modules/auth/auth.controller.ts`
+
+#### 2.6 Module Configuration
+- [ ] Update `auth.module.ts` - import JwtModule, configure strategies, export guards
+
+**Files to modify:**
+- `src/modules/auth/auth.module.ts`
+
+#### 2.7 Environment Variables
+- [ ] Add to `env.example`:
+  - `JWT_SECRET`
+  - `JWT_EXPIRES_IN`
+  - `JWT_REFRESH_EXPIRES_IN`
+  - `HMAC_SECRET` (for refresh token hashing)
+
+**Files to modify:**
+- `env.example`
+
+
+---
+
+### 🎯 Phase 3: Email Infrastructure
+
+**Goal:** Set up email sending for verification and password reset.
+
+#### 3.1 Mailer Module Setup
+- [ ] Install dependencies: `nodemailer`, `handlebars`, `@sendgrid/mail` (optional)
+- [ ] Create `modules/mailer/mailer.module.ts`
+- [ ] Create `modules/mailer/mailer.service.ts` with provider abstraction
+- [ ] Implement Ethereal provider (dev)
+- [ ] Implement SendGrid provider (staging/prod)
+
+**Files to create:**
+- `src/modules/mailer/mailer.module.ts`
+- `src/modules/mailer/mailer.service.ts`
+- `src/modules/mailer/providers/ethereal.provider.ts`
+- `src/modules/mailer/providers/sendgrid.provider.ts`
+
+#### 3.2 BullMQ Integration
+- [ ] Create `modules/mailer/processors/mail.processor.ts`
+- [ ] Configure BullMQ queue for email jobs
+- [ ] Implement retry logic and error handling
+
+**Files to create:**
+- `src/modules/mailer/processors/mail.processor.ts`
+- `src/modules/mailer/queues/mail.queue.ts`
+
+#### 3.3 Email Templates
+- [ ] Create Handlebars templates:
+  - `templates/verification.hbs` - Email verification
+  - `templates/password-reset.hbs` - Password reset
+  - `templates/welcome.hbs` - Welcome email
+
+**Files to create:**
+- `src/modules/mailer/templates/verification.hbs`
+- `src/modules/mailer/templates/password-reset.hbs`
+- `src/modules/mailer/templates/welcome.hbs`
+
+#### 3.4 Environment Variables
+- [ ] Add mailer config to `env.example`
+
+**Files to modify:**
+- `env.example`
+
+
+---
+
+### 🎯 Phase 4: Email Verification & Password Reset
+
+**Goal:** Complete auth flows with email verification and password reset.
+
+#### 4.1 Email Verification Flow
+- [ ] Update `register()` - set `isEmailVerified = false`, generate verification token
+- [ ] Add `sendVerificationEmail()` to AuthService
+- [ ] Create `POST /auth/verify` endpoint - validates token, sets `isEmailVerified = true`
+- [ ] Create `POST /auth/resend-verification` endpoint - resends verification email
+
+**Files to modify:**
+- `src/modules/auth/auth.service.ts`
+- `src/modules/auth/auth.controller.ts`
+
+**Files to create:**
+- `src/modules/auth/dto/verify-email.dto.ts`
+
+#### 4.2 Password Reset Flow
+- [ ] Create `POST /auth/forgot-password` endpoint - generates reset token, sends email
+- [ ] Create `POST /auth/reset-password` endpoint - validates token, updates password
+- [ ] Implement token invalidation (single-use)
+
+**Files to modify:**
+- `src/modules/auth/auth.service.ts`
+- `src/modules/auth/auth.controller.ts`
+
+**Files to create:**
+- `src/modules/auth/dto/password-reset.dto.ts`
+
+
+---
+
+### 🎯 Phase 5: Rate Limiting
+
+**Goal:** Protect endpoints from abuse and brute-force attacks.
+
+#### 5.1 Rate Limiting Module
+- [ ] Install `rate-limiter-flexible`
+- [ ] Create `common/rate-limiting/rate-limit.module.ts`
+- [ ] Create `common/rate-limiting/rate-limit.service.ts`
+- [ ] Implement Redis-backed rate limiters for each endpoint type
+
+**Files to create:**
+- `src/common/rate-limiting/rate-limit.module.ts`
+- `src/common/rate-limiting/rate-limit.service.ts`
+- `src/common/rate-limiting/rate-limit.guard.ts`
+
+#### 5.2 Apply Rate Limits
+- [ ] Create decorator `@RateLimit()` for flexible application
+- [ ] Apply rate limits to:
+  - `/auth/login` - 5/min
+  - `/auth/register` - 3/hour
+  - `/auth/refresh` - 30/min
+  - `/auth/forgot-password` - 3/hour
+  - `/auth/resend-verification` - 5/hour
+
+**Files to create:**
+- `src/common/rate-limiting/decorators/rate-limit.decorator.ts`
+
+**Files to modify:**
+- `src/modules/auth/auth.controller.ts`
+
+#### 5.3 Environment Variables
+- [ ] Add rate limit config to `env.example`
+
+**Files to modify:**
+- `env.example`
+
+
+---
+
+### 🎯 Phase 6: Observability & Monitoring
+
+**Goal:** Add metrics and logging for auth operations.
+
+#### 6.1 Prometheus Metrics
+- [ ] Add auth-specific metrics to PrometheusService:
+  - `auth_login_attempts_total` (counter)
+  - `auth_login_failures_total` (counter)
+  - `auth_token_refreshes_total` (counter)
+  - `auth_registrations_total` (counter)
+  - `rate_limit_blocks_total` (counter)
+
+**Files to modify:**
+- `src/common/prometheus/prometheus.service.ts`
+
+#### 6.2 Structured Logging
+- [ ] Add Pino logging in AuthService for:
+  - Login attempts (success/failure)
+  - Token refresh events
+  - Token reuse detection (security alert)
+  - Registration events
+
+**Files to modify:**
+- `src/modules/auth/auth.service.ts`
+
+#### 6.3 Error Handling
+- [ ] Create custom exceptions:
+  - `InvalidCredentialsException`
+  - `TokenExpiredException`
+  - `TokenReusedException` (security alert)
+  - `EmailNotVerifiedException`
+
+**Files to create:**
+- `src/modules/auth/exceptions/auth.exceptions.ts`
+
+
+---
+
+### 🎯 Phase 7: Testing & Validation
+
+**Goal:** Ensure reliability and security through comprehensive testing.
+
+#### 7.1 Unit Tests
+- [ ] Test AuthService methods (register, login, refresh, logout)
+- [ ] Test token utilities (hashing, generation)
+- [ ] Test guards and decorators
+
+**Files to create:**
+- `src/modules/auth/auth.service.spec.ts`
+- `src/modules/auth/utils/token.util.spec.ts`
+- `src/modules/auth/guards/jwt-auth.guard.spec.ts`
+
+#### 7.2 Integration Tests
+- [ ] Test registration flow end-to-end
+- [ ] Test login flow with invalid credentials
+- [ ] Test token refresh and rotation
+- [ ] Test email verification flow
+
+**Files to create:**
+- `test/auth.e2e-spec.ts`
+
+#### 7.3 Security Tests
+- [ ] Test refresh token reuse detection (revokes all sessions)
+- [ ] Test rate limiting blocks excessive requests
+- [ ] Test password reset token single-use enforcement
+- [ ] Test expired token rejection
+
+#### 7.4 Load Testing
+- [ ] k6 script for `/auth/refresh` endpoint (validate HMAC performance)
+- [ ] k6 script for `/auth/login` endpoint (validate rate limiting)
+- [ ] Monitor metrics during load tests
+
+**Files to create:**
+- `k6/auth-test.js`
+
+
+---
+
+### 🎯 Phase 8: Documentation & Cleanup
+
+**Goal:** Document implementation and prepare for production.
+
+#### 8.1 API Documentation
+- [ ] Update Postman collection with auth endpoints
+- [ ] Document request/response formats
+- [ ] Add example curl commands
+
+**Files to modify:**
+- `docs/Ecom-Dev-Collection.postman_collection.json`
+
+#### 8.2 Code Documentation
+- [ ] Add JSDoc comments to all public methods
+- [ ] Document security considerations
+- [ ] Add inline comments for complex logic
+
+#### 8.3 README Updates
+- [ ] Update README with auth setup instructions
+- [ ] Document environment variables
+- [ ] Add troubleshooting section
+
+**Files to modify:**
+- `README.md`
+
+
+---
+
+## 🧩 Integration Points
+
+| Component | Integration Method | Purpose |
+|-----------|-------------------|---------|
+| **Prisma** | `PrismaService` (global) | User and RefreshToken data access |
+| **Redis** | `RedisService` (global) | Rate limiting, token blacklist (future) |
+| **Prometheus** | `PrometheusService` (global) | Auth metrics (login attempts, failures) |
+| **Pino Logger** | `Logger` (global) | Structured logging of auth events |
+| **BullMQ** | Queue module | Async email sending |
+| **JWT Module** | `JwtModule` (imported in AuthModule) | Token signing and verification |
+
+---
+
+## 🧪 Testing Strategy
+
+### ✅ Unit Tests
+
+Test individual components in isolation:
+- AuthService business logic
+- Token utilities (hashing, generation)
+- Guards and decorators
+- DTO validation
+
+### ✅ Integration Tests
+
+Test complete flows:
+- Registration → Email Verification → Login
+- Login → Token Refresh → Logout
+- Password Reset Flow
+
+### ✅ Security Tests
+
+Validate security controls:
+- Refresh token reuse detection
+- Rate limiting effectiveness
+- Token expiration handling
+- Password reset token single-use
+
+### ✅ Load Tests
+
+Performance validation:
+- `/auth/refresh` endpoint under load (HMAC performance)
+- Rate limiting under high request volume
+- Database query performance for token lookups
+
+**Tool:** k6 scripts in `k6/` directory
+
+---
+
+## 🚀 Future Extensions
+
+| Feature | Priority | Estimated Complexity |
+|---------|----------|---------------------|
+| 🔄 **OAuth2 (Google, GitHub)** | Medium | Medium (4-6 hours) |
+| 📬 **Magic Link / Passwordless Login** | Low | Medium (3-4 hours) |
+| 🧍 **Two-Factor Authentication (2FA)** | Medium | High (8-10 hours) |
+| 🔎 **User Activity Logs & Session Analytics** | Low | Medium (4-5 hours) |
+| 🔐 **Token Blacklist (Redis)** | Low | Low (2-3 hours) |
+| 🌍 **Multi-device Session Management** | Low | Medium (4-5 hours) |
+
+---
+
+## 📊 Summary
+
+| Aspect | Implementation | Status |
+|--------|---------------|--------|
+| **Authentication** | JWT + Refresh Tokens | ⏳ Planned |
+| **Password Security** | bcrypt (12 rounds) | ⏳ Planned |
+| **Token Security** | HMAC-SHA256 hashing | ⏳ Planned |
+| **Email Infrastructure** | Mailer module + BullMQ | ⏳ Planned |
+| **Rate Limiting** | Redis-backed (rate-limiter-flexible) | ⏳ Planned |
+| **Observability** | Prometheus + Pino | ⏳ Planned |
+| **Testing** | Unit + Integration + Security | ⏳ Planned |
+
+---
+
+**Last Updated:** Implementation plan created.

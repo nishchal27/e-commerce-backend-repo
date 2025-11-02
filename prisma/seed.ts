@@ -25,23 +25,29 @@ async function main() {
   console.log('Seeding users...');
   const hashedPassword = await bcrypt.hash('password123', 10);
 
+  // Seed customer user with email verified (for testing auth flows)
   const customer = await prisma.user.upsert({
     where: { email: 'customer@example.com' },
     update: {},
     create: {
       email: 'customer@example.com',
       password: hashedPassword,
+      name: 'Test Customer',
       role: 'CUSTOMER',
+      isEmailVerified: true, // Set to true for easier testing (usually false until verification)
     },
   });
 
+  // Seed admin user with email verified
   const admin = await prisma.user.upsert({
     where: { email: 'admin@example.com' },
     update: {},
     create: {
       email: 'admin@example.com',
       password: hashedPassword,
+      name: 'Admin User',
       role: 'ADMIN',
+      isEmailVerified: true, // Admin email verified by default
     },
   });
 
