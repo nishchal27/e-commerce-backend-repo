@@ -4,7 +4,7 @@ A production-minded NestJS e-commerce backend with observability, caching, and m
 
 ## 📋 Overview
 
-This is an advanced e-commerce backend built with NestJS and TypeScript, designed as a learning project that demonstrates:
+This is an advanced e-commerce backend built with NestJS and TypeScript, designed as a Experiment/Study project that demonstrates:
 
 - **Real-world backend architecture**: Stateless API servers, caches, queues, databases, and background workers
 - **DS/Algorithms**: LRU cache implementation, search algorithms, recommendation systems

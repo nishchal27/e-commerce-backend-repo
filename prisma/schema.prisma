@@ -14,26 +14,47 @@ datasource db {
 }
 
 // User model for authentication and authorization
-// Supports roles: customer, admin
+// Supports roles: customer, admin, manager (for future inventory/order management)
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String   // Hashed password (bcrypt)
-  role      UserRole @default(CUSTOMER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(uuid())
+  email           String   @unique
+  password        String   // Hashed password using bcrypt (12 rounds)
+  name            String?  // Optional display name
+  role            UserRole @default(CUSTOMER)
+  isEmailVerified Boolean  @default(false) // Email verification status for security
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relations
-  orders Order[]
-  reviews Review[]
+  orders       Order[]
+  reviews      Review[]
+  refreshTokens RefreshToken[] // Refresh tokens for this user (supports multi-device)
 
   @@map("users")
 }
 
+// Refresh token model - stores refresh tokens for authentication
+// Tokens are stored as HMAC-SHA256 hashes (not plaintext) for security
+// Each user can have multiple refresh tokens (one per device/browser)
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique // HMAC-SHA256 hash of the refresh token (security: never store plaintext)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime // Token expiration time for cleanup and security
+  createdAt DateTime @default(now())
+
+  @@index([userId]) // Fast lookup by user ID (e.g., invalidate all tokens for a user)
+  @@index([tokenHash]) // Fast lookup by token hash (for refresh token validation)
+  @@index([expiresAt]) // Fast lookup for cleanup of expired tokens (scheduled jobs)
+  @@map("refresh_tokens")
+}
+
 // User roles enum
 enum UserRole {
-  CUSTOMER
-  ADMIN
+  CUSTOMER // Regular customer role
+  ADMIN    // Administrator role (full access)
+  MANAGER  // Manager role (future: inventory/order management access)
 }
 
 // Product model - represents a product in the catalog
