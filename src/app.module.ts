@@ -23,6 +23,9 @@ import { PrometheusModule } from './common/prometheus/prometheus.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { PrometheusMiddleware } from './common/prometheus/prometheus.middleware';
 
+// Experiments module
+import { ExperimentsModule } from './modules/experiments/experiments.module';
+
 /**
  * AppModule - Root module of the application
  *
@@ -56,6 +59,9 @@ import { PrometheusMiddleware } from './common/prometheus/prometheus.middleware'
     // Feature modules
     ProductsModule,
     AuthModule, // Minimal scaffold for now
+
+    // Experiments module - provides experiments feature
+    ExperimentsModule,
 
     // TODO: Add more modules as they are implemented:
     // - InventoryModule
