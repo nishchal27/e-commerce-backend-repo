@@ -1,30 +1,86 @@
 /**
- * Auth Module (Minimal Scaffold)
+ * Auth Module
  *
- * This module provides authentication and authorization functionality.
- * Currently scaffolded as a placeholder for future implementation.
+ * This module provides authentication and authorization functionality for the application.
+ * It configures JWT authentication, Passport strategies, guards, and auth endpoints.
  *
- * TODO: Implement:
- * - JWT token generation and validation
- * - User registration and login endpoints
- * - Password hashing with bcrypt
- * - Refresh token support
- * - Role-based access control (RBAC)
- * - JWT strategy for Passport
- * - Auth guards for protecting routes
+ * Responsibilities:
+ * - Configures JwtModule with secret and expiration
+ * - Registers Passport strategies (JWT, Refresh)
+ * - Provides AuthService for business logic
+ * - Exports guards for use in other modules
+ * - Registers AuthController with endpoints
+ *
+ * Integration:
+ * - Uses PrismaService (global) for database access
+ * - Uses ConfigService (global) for environment variables
+ * - Uses Logger (global) for structured logging
+ *
+ * Exports:
+ * - JwtAuthGuard: For protecting routes in other modules
+ * - RolesGuard: For role-based access control
+ * - Public decorator: For marking public routes
+ * - Roles decorator: For specifying required roles
  */
 
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthService } from './auth.service';
+import { AuthController } from './auth.controller';
+import { JwtStrategy } from './strategies/jwt.strategy';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 
 /**
  * AuthModule provides authentication and authorization services
- * Minimal scaffold - to be implemented in future iterations
  */
 @Module({
-  imports: [],
-  controllers: [],
-  providers: [],
-  exports: [],
+  imports: [
+    // PassportModule enables Passport integration
+    PassportModule.register({ defaultStrategy: 'jwt' }),
+
+    // JwtModule provides JWT token signing and verification
+    // Configured dynamically using ConfigService
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => {
+        const secret = configService.get<string>('JWT_SECRET');
+        const expiresIn = configService.get<string>('JWT_EXPIRES_IN', '3600');
+
+        if (!secret) {
+          throw new Error('JWT_SECRET is required in environment variables');
+        }
+
+        return {
+          secret, // Secret key for signing tokens
+          signOptions: {
+            expiresIn, // Token expiration time (default: 1 hour)
+          },
+        };
+      },
+      inject: [ConfigService],
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [
+    // AuthService contains business logic for authentication
+    AuthService,
+
+    // Passport strategies for validating tokens
+    JwtStrategy, // Validates JWT access tokens from Authorization header
+
+    // Guards for protecting routes
+    JwtAuthGuard, // Requires valid JWT token
+    RolesGuard, // Enforces role-based access control
+  ],
+  exports: [
+    // Export guards and service for use in other modules
+    JwtAuthGuard, // Other modules can use this to protect routes
+    RolesGuard, // Other modules can use this for RBAC
+    AuthService, // Other modules might need to validate users
+    PassportModule, // Export PassportModule for strategy registration
+  ],
 })
 export class AuthModule {}
-
