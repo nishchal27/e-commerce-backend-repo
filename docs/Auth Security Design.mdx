@@ -806,77 +806,398 @@ Performance validation:
 
 ---
 
-**Last Updated:** Implementation plan created.
+**Last Updated:** Implementation progress tracked below.
 
-#IMPLEMENTATION:
+---
 
-Implemented:
-1. DTOs with validation (src/modules/auth/dto/)
-register.dto.ts — Email, password (min 8 chars), optional name
-login.dto.ts — Email and password validation
-refresh.dto.ts — Placeholder for refresh requests (uses cookie)
-All DTOs use class-validator decorators for automatic validation.
-2. AuthService (src/modules/auth/auth.service.ts)
-Methods:
-register() — User registration with password hashing
-login() — Credential validation and token generation
-refresh() — Token refresh with rotation
-logout() — Token invalidation
-validateUser() — For Passport strategies
-Security:
-Bcrypt password hashing (12 rounds)
-HMAC-SHA256 refresh token hashing
-Token rotation on refresh
-Generic error messages to prevent enumeration
-3. Passport strategies (src/modules/auth/strategies/)
-jwt.strategy.ts — Validates JWT access tokens from Authorization header
-refresh.strategy.ts — Validates refresh tokens from cookies (for future use)
-4. Guards and decorators (src/modules/auth/guards/ & decorators/)
-Guards:
-jwt-auth.guard.ts — Protects routes, checks @Public() decorator
-roles.guard.ts — Enforces RBAC based on @Roles() decorator
-Decorators:
-public.decorator.ts — Marks routes as public
-roles.decorator.ts — Specifies required roles
-current-user.decorator.ts — Extracts user from request
-5. AuthController (src/modules/auth/auth.controller.ts)
-Endpoints:
-POST /auth/register — Public, registers user, returns tokens
-POST /auth/login — Public, authenticates user, returns tokens
-POST /auth/refresh — Public, refreshes access token, rotates refresh token
-POST /auth/logout — Protected, invalidates refresh token
-GET /auth/me — Protected, returns current user profile
-Security:
-HttpOnly cookies for refresh tokens
-Secure cookies in production
-SameSite: strict to prevent CSRF
-6. AuthModule (src/modules/auth/auth.module.ts)
-Configures JwtModule with dynamic secrets
-Registers Passport strategies
-Exports guards for use in other modules
-Integrates with global services (Prisma, Config, Logger)
-File structure
-src/modules/auth/├── dto/│   ├── register.dto.ts│   ├── login.dto.ts│   └── refresh.dto.ts├── strategies/│   ├── jwt.strategy.ts│   └── refresh.strategy.ts├── guards/│   ├── jwt-auth.guard.ts│   └── roles.guard.ts├── decorators/│   ├── public.decorator.ts│   ├── roles.decorator.ts│   └── current-user.decorator.ts├── auth.controller.ts├── auth.service.ts└── auth.module.ts
-Build status
-TypeScript compilation: Success
-No linter errors
-All dependencies resolved
-Features
-Security practices:
-Password hashing with bcrypt
-Refresh token hashing with HMAC-SHA256
-Token rotation
-HttpOnly cookies
-Generic error messages
-Developer experience:
-Clear comments explaining purpose and reasoning
-Type-safe interfaces
-Consistent error handling
-Modular architecture
-Production readiness:
-Environment-based configuration
-Structured logging
-Error handling
-Scalable design
+## 📊 Implementation Status
 
+This section tracks the current implementation progress for each phase defined in the [Implementation Plan](#-implementation-plan).
 
+### ✅ Phase Status Overview
+
+| Phase | Status | Completion |
+|-------|--------|------------|
+| **Phase 1: Core Infrastructure** | ✅ Complete | 100% |
+| **Phase 2: Authentication Core** | ✅ Complete | 100% |
+| **Phase 3: Email Infrastructure** | ✅ Complete | 100% |
+| **Phase 4: Email Verification & Password Reset** | ⏳ Pending | 0% |
+| **Phase 5: Rate Limiting** | ⏳ Pending | 0% |
+| **Phase 6: Observability & Monitoring** | ⏳ Pending | 0% |
+| **Phase 7: Testing & Validation** | ⏳ Pending | 0% |
+| **Phase 8: Documentation & Cleanup** | ⏳ Pending | 0% |
+
+---
+
+## ✅ Phase 1: Core Infrastructure
+
+### 1.1 Database Schema & Migration
+- ✅ Prisma schema updated with `User` and `RefreshToken` models
+- ✅ Indexes added for performance (`userId`, `tokenHash`, `expiresAt`)
+- ✅ Migration created and ready
+
+### 1.2 Token Utilities
+- ✅ Created `src/modules/auth/utils/token.util.ts` with:
+  - `generateAccessToken()` - JWT generation
+  - `generateRefreshToken()` - UUID generation
+  - `hashRefreshToken()` - HMAC-SHA256 hashing
+  - `verifyRefreshToken()` - Hash comparison
+
+### 1.3 Interfaces & Types
+- ✅ Created `src/modules/auth/interfaces/jwt-payload.interface.ts`
+- ✅ Created `src/modules/auth/interfaces/token-pair.interface.ts`
+- ✅ Created `src/modules/auth/interfaces/refresh-token-payload.interface.ts`
+
+---
+
+## ✅ Phase 2: Authentication Core (MVP)
+
+### 2.1 DTOs & Validation
+- ✅ `dto/register.dto.ts` - Email, password (min 8 chars), optional name
+- ✅ `dto/login.dto.ts` - Email and password validation
+- ✅ `dto/refresh.dto.ts` - Placeholder for refresh requests (uses cookie)
+- ✅ All DTOs use `class-validator` decorators for automatic validation
+
+### 2.2 Auth Service
+- ✅ **File:** `src/modules/auth/auth.service.ts`
+
+**Implemented Methods:**
+- `register()` - User registration with password hashing
+- `login()` - Credential validation and token generation
+- `refresh()` - Token refresh with rotation
+- `logout()` - Token invalidation
+- `validateUser()` - For Passport strategies
+
+**Security Features:**
+- ✅ Bcrypt password hashing (12 rounds)
+- ✅ HMAC-SHA256 refresh token hashing
+- ✅ Token rotation on refresh
+- ✅ Generic error messages to prevent enumeration
+
+### 2.3 Passport Strategies
+- ✅ `strategies/jwt.strategy.ts` - Validates JWT access tokens from `Authorization` header
+- ✅ `strategies/refresh.strategy.ts` - Validates refresh tokens from cookies (for future use)
+
+### 2.4 Guards & Decorators
+**Guards:**
+- ✅ `guards/jwt-auth.guard.ts` - Protects routes, checks `@Public()` decorator
+- ✅ `guards/roles.guard.ts` - Enforces RBAC based on `@Roles()` decorator
+
+**Decorators:**
+- ✅ `decorators/public.decorator.ts` - Marks routes as public
+- ✅ `decorators/roles.decorator.ts` - Specifies required roles
+- ✅ `decorators/current-user.decorator.ts` - Extracts user from request
+
+### 2.5 Controller & Routes
+- ✅ **File:** `src/modules/auth/auth.controller.ts`
+
+**Endpoints Implemented:**
+| Endpoint | Method | Access | Description |
+|----------|--------|--------|-------------|
+| `/auth/register` | POST | Public | Registers user, returns tokens |
+| `/auth/login` | POST | Public | Authenticates user, returns tokens |
+| `/auth/refresh` | POST | Public | Refreshes access token, rotates refresh token |
+| `/auth/logout` | POST | Protected | Invalidates refresh token |
+| `/auth/me` | GET | Protected | Returns current user profile |
+
+**Security Features:**
+- ✅ HttpOnly cookies for refresh tokens
+- ✅ Secure cookies in production
+- ✅ SameSite: strict to prevent CSRF
+
+### 2.6 Module Configuration
+- ✅ `auth.module.ts` configured with:
+  - JwtModule with dynamic secrets
+  - Passport strategies registered
+  - Guards exported for use in other modules
+  - Integration with global services (Prisma, Config, Logger)
+
+### 2.7 Environment Variables
+- ✅ Updated `env.example` with:
+  - `JWT_SECRET`
+  - `JWT_EXPIRES_IN`
+  - `JWT_REFRESH_EXPIRES_IN`
+  - `HMAC_SECRET` (for refresh token hashing)
+
+### 📁 File Structure (Phase 2)
+
+```
+src/modules/auth/
+├── dto/
+│   ├── register.dto.ts
+│   ├── login.dto.ts
+│   └── refresh.dto.ts
+├── strategies/
+│   ├── jwt.strategy.ts
+│   └── refresh.strategy.ts
+├── guards/
+│   ├── jwt-auth.guard.ts
+│   └── roles.guard.ts
+├── decorators/
+│   ├── public.decorator.ts
+│   ├── roles.decorator.ts
+│   └── current-user.decorator.ts
+├── interfaces/
+│   ├── jwt-payload.interface.ts
+│   ├── token-pair.interface.ts
+│   └── refresh-token-payload.interface.ts
+├── utils/
+│   └── token.util.ts
+├── auth.controller.ts
+├── auth.service.ts
+└── auth.module.ts
+```
+
+### ✅ Build Status
+- ✅ TypeScript compilation: **Success**
+- ✅ No linter errors
+- ✅ All dependencies resolved
+
+### ✨ Key Features Implemented
+
+**Security Practices:**
+- ✅ Password hashing with bcrypt (12 rounds)
+- ✅ Refresh token hashing with HMAC-SHA256
+- ✅ Token rotation on refresh
+- ✅ HttpOnly cookies
+- ✅ Generic error messages
+
+**Developer Experience:**
+- ✅ Clear comments explaining purpose and reasoning
+- ✅ Type-safe interfaces
+- ✅ Consistent error handling
+- ✅ Modular architecture
+
+**Production Readiness:**
+- ✅ Environment-based configuration
+- ✅ Structured logging
+- ✅ Error handling
+- ✅ Scalable design
+
+---
+
+## ✅ Phase 3: Email Infrastructure
+
+### 3.1 Dependencies Installed
+- ✅ `nodemailer` - SMTP client
+- ✅ `handlebars` - Template engine
+- ✅ `@types/nodemailer` - TypeScript types
+
+### 3.2 Email Providers
+- ✅ **File:** `src/modules/mailer/providers/`
+
+**Providers Implemented:**
+| Provider | File | Purpose |
+|----------|------|---------|
+| **Ethereal** | `ethereal.provider.ts` | Development provider (captures emails, no real sending) |
+| **SMTP** | `smtp.provider.ts` | Production provider (sends via SMTP) |
+
+**Features:**
+- ✅ Provider abstraction interface (`IMailProvider`)
+- ✅ Easy switching via `MAILER_DRIVER` env var
+- ✅ Provider verification on startup
+
+### 3.3 Email Templates
+- ✅ **Directory:** `src/modules/mailer/templates/`
+
+**Templates Implemented:**
+- ✅ `verification.hbs` - Email verification template
+- ✅ `password-reset.hbs` - Password reset template
+- ✅ `welcome.hbs` - Welcome email template
+
+**Template Features:**
+- ✅ Responsive HTML design
+- ✅ Handlebars templating with variables
+- ✅ Common variables (appName, appUrl, year)
+
+### 3.4 Mailer Service
+- ✅ **File:** `src/modules/mailer/mailer.service.ts`
+
+**Features:**
+- ✅ Template rendering with Handlebars
+- ✅ Async email queuing via BullMQ
+- ✅ Synchronous sending option
+- ✅ Provider abstraction
+
+**Methods:**
+- `queueEmail()` - Queue email for async processing (recommended)
+- `sendEmail()` - Send email immediately (use sparingly)
+- `sendMailDirectly()` - Direct provider access (for processor)
+
+### 3.5 BullMQ Integration
+- ✅ **File:** `src/modules/mailer/processors/mail.processor.ts`
+
+**Features:**
+- ✅ Automatic retries (up to 3 attempts)
+- ✅ Exponential backoff
+- ✅ Concurrent processing (5 emails at once)
+- ✅ Rate limiting (10 emails/second)
+- ✅ Job cleanup (completed/failed jobs)
+
+### 3.6 Mailer Module
+- ✅ **File:** `src/modules/mailer/mailer.module.ts`
+
+**Configuration:**
+- ✅ BullMQ queue configuration
+- ✅ Redis connection setup
+- ✅ Provider initialization
+- ✅ Module verification on startup
+
+### 3.7 Environment Configuration
+- ✅ Updated `env.example` with:
+  - `MAILER_DRIVER` - Provider selection (ethereal/smtp)
+  - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`
+  - `FROM_EMAIL` / `FROM_NAME` - Sender details
+  - `APP_URL` - Application URL for email links
+
+### 📁 File Structure (Phase 3)
+
+```
+src/modules/mailer/
+├── interfaces/
+│   ├── mail-options.interface.ts
+│   └── mail-provider.interface.ts
+├── providers/
+│   ├── ethereal.provider.ts
+│   └── smtp.provider.ts
+├── templates/
+│   ├── verification.hbs
+│   ├── password-reset.hbs
+│   └── welcome.hbs
+├── processors/
+│   └── mail.processor.ts
+├── mailer.service.ts
+└── mailer.module.ts
+```
+
+### 🔗 Integration
+- ✅ `MailerModule` imported in `AppModule`
+- ✅ BullMQ configured with Redis connection
+- ✅ `MailerService` exported for use in `AuthModule` (Phase 4)
+
+### ✅ Build Status
+- ✅ TypeScript compilation: **Success**
+- ✅ No linter errors
+- ✅ All dependencies resolved
+
+### ✨ Key Features Implemented
+
+**Async Processing:**
+- ✅ Emails queued via BullMQ, non-blocking
+- ✅ Automatic retries with exponential backoff
+- ✅ Concurrent processing for high throughput
+
+**Provider Abstraction:**
+- ✅ Easy switching between dev/prod providers
+- ✅ Interface-based design for extensibility
+
+**Template Engine:**
+- ✅ Handlebars with responsive templates
+- ✅ Variable substitution support
+
+**Error Handling:**
+- ✅ Retries, logging, graceful failures
+- ✅ Job cleanup and monitoring
+
+**Production Ready:**
+- ✅ Redis-backed queue
+- ✅ Configurable providers
+- ✅ Environment-based configuration
+
+---
+
+## ⏳ Phase 4: Email Verification & Password Reset
+
+**Status:** Not yet started
+
+### 4.1 Email Verification Flow
+- [ ] Update `register()` - set `isEmailVerified = false`, generate verification token
+- [ ] Add `sendVerificationEmail()` to AuthService
+- [ ] Create `POST /auth/verify` endpoint
+- [ ] Create `POST /auth/resend-verification` endpoint
+- [ ] Create `dto/verify-email.dto.ts`
+
+### 4.2 Password Reset Flow
+- [ ] Create `POST /auth/forgot-password` endpoint
+- [ ] Create `POST /auth/reset-password` endpoint
+- [ ] Implement token invalidation (single-use)
+- [ ] Create `dto/password-reset.dto.ts`
+
+---
+
+## ⏳ Phase 5: Rate Limiting
+
+**Status:** Not yet started
+
+### 5.1 Rate Limiting Module
+- [ ] Install `rate-limiter-flexible`
+- [ ] Create rate limiting module, service, and guard
+- [ ] Implement Redis-backed rate limiters
+
+### 5.2 Apply Rate Limits
+- [ ] Create `@RateLimit()` decorator
+- [ ] Apply rate limits to auth endpoints
+
+---
+
+## ⏳ Phase 6: Observability & Monitoring
+
+**Status:** Not yet started
+
+### 6.1 Prometheus Metrics
+- [ ] Add auth-specific metrics to PrometheusService
+
+### 6.2 Structured Logging
+- [ ] Add Pino logging in AuthService
+
+### 6.3 Error Handling
+- [ ] Create custom auth exceptions
+
+---
+
+## ⏳ Phase 7: Testing & Validation
+
+**Status:** Not yet started
+
+### 7.1 Unit Tests
+- [ ] Test AuthService methods
+- [ ] Test token utilities
+- [ ] Test guards and decorators
+
+### 7.2 Integration Tests
+- [ ] Test registration flow end-to-end
+- [ ] Test login flow with invalid credentials
+- [ ] Test token refresh and rotation
+- [ ] Test email verification flow
+
+### 7.3 Security Tests
+- [ ] Test refresh token reuse detection
+- [ ] Test rate limiting blocks excessive requests
+- [ ] Test password reset token single-use enforcement
+- [ ] Test expired token rejection
+
+### 7.4 Load Testing
+- [ ] k6 script for `/auth/refresh` endpoint
+- [ ] k6 script for `/auth/login` endpoint
+- [ ] Monitor metrics during load tests
+
+---
+
+## ⏳ Phase 8: Documentation & Cleanup
+
+**Status:** Not yet started
+
+### 8.1 API Documentation
+- [ ] Update Postman collection with auth endpoints
+- [ ] Document request/response formats
+- [ ] Add example curl commands
+
+### 8.2 Code Documentation
+- [ ] Add JSDoc comments to all public methods
+- [ ] Document security considerations
+- [ ] Add inline comments for complex logic
+
+### 8.3 README Updates
+- [ ] Update README with auth setup instructions
+- [ ] Document environment variables
+- [ ] Add troubleshooting section
