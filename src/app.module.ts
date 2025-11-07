@@ -14,6 +14,7 @@ import { AppService } from './app.service';
 // Feature modules
 import { ProductsModule } from './modules/products/products.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { MailerModule } from './modules/mailer/mailer.module';
 
 // Common modules and utilities
 import { LoggerModule } from './lib/logger/logger.module';
@@ -58,7 +59,8 @@ import { ExperimentsModule } from './modules/experiments/experiments.module';
 
     // Feature modules
     ProductsModule,
-    AuthModule, // Minimal scaffold for now
+    AuthModule,
+    MailerModule, // Email sending infrastructure
 
     // Experiments module - provides experiments feature
     ExperimentsModule,
