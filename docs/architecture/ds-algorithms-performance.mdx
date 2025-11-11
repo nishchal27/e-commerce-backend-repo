@@ -1,0 +1,293 @@
+
+````mdx
+---
+title: ⚙️ Data Structures, Algorithms & Performance Optimization
+description: A practical guide for using data structures and algorithms effectively in our NestJS E-commerce backend.
+---
+
+# ⚙️ Data Structures, Algorithms & Performance Optimization
+
+> “Measure, don’t guess — every optimization should have proof.”
+
+---
+
+## 🧩 What Are Data Structures and Algorithms?
+
+| Concept | Description | Examples |
+|----------|--------------|-----------|
+| **Data Structure (DS)** | A way to organize and store data efficiently. | Array, HashMap, Tree, Queue, Trie, Heap |
+| **Algorithm (ALGO)** | A procedure or logic that operates on data structures. | Sorting, Searching, Caching, Locking, Ranking |
+
+**Together, they define:**  
+✅ Speed (latency & throughput)  
+✅ Cost (CPU & memory usage)  
+✅ Scalability (how well code handles growth)  
+✅ Correctness (data consistency & concurrency)
+
+---
+
+## 🏗️ Why This Matters in Our E-commerce App
+
+Your backend must handle:
+- 1,000s of concurrent requests (reads, writes, updates)
+- Fast product searches
+- Reliable checkout and inventory
+- Personalized recommendations
+
+👉 The right **data structures & algorithms** make this possible — turning theoretical knowledge into **observable performance improvements**.
+
+---
+
+## 📊 Performance Impact Overview
+
+| Area | Problem | DS/Algo Used | Expected Impact |
+|------|----------|---------------|------------------|
+| **Product Reads** | Repeated DB hits | LRU Cache / Redis | ↓ DB load, ↓ latency |
+| **Search & Autocomplete** | Slow prefix match | Trie / Inverted Index | ↑ speed, ↑ UX |
+| **Inventory Updates** | Concurrency conflicts | Optimistic Locking | ↑ throughput, consistent stock |
+| **Checkout Deduplication** | Duplicate orders | HashSet / Redis | Prevents duplicates |
+| **Recommendations** | Low relevance | Graphs / ANN / Popularity ranking | ↑ personalization |
+| **Metrics & Logging** | Hard to measure perf | Prometheus, K6, Experiment Schema | Data-driven optimization |
+
+---
+
+## 🧠 Core Concepts
+
+### ⚡ Time Complexity (Speed)
+How fast an algorithm runs.
+- O(1) → Constant (best)
+- O(log n) → Logarithmic
+- O(n) → Linear
+- O(n²) → Quadratic (avoid for large data)
+
+### 💾 Space Complexity (Memory)
+How much memory it consumes.
+- Trade-off: caching saves time but uses memory.
+
+### ⚖️ Trade-offs in Practice
+| Trade-off | Example |
+|------------|----------|
+| CPU vs Memory | Cache more → use more RAM |
+| Latency vs Consistency | Locking ensures safety → slows writes |
+| Cost vs Scalability | Caching or indexing reduces infra cost long-term |
+
+---
+
+## 🏬 E-commerce Scenarios & Algorithms
+
+### 🧺 Product Detail Reads (Hot Reads)
+**Problem:** Too many DB hits for same product.  
+**Solution:** Use **LRU Cache** (in-memory) or **Redis cache**.
+
+```ts
+async getProduct(id: string) {
+  const cached = await redis.get(`product:${id}`);
+  if (cached) return JSON.parse(cached);
+  const product = await db.findProduct(id);
+  await redis.set(`product:${id}`, JSON.stringify(product), 'EX', 3600);
+  return product;
+}
+````
+
+🧩 **DS Used:** HashMap + Doubly Linked List (for LRU)
+🎯 **Metric:** ↓ p95 latency, ↓ DB queries, ↑ memory
+
+---
+
+### 🔍 Product Search & Autocomplete
+
+* **Trie** (prefix-based lookup) for small data, O(prefix length)
+* **Postgres Full-text Search** or **Meilisearch** for production scale
+
+🧩 **DS Used:** Trie or Inverted Index
+🎯 **Metric:** Query latency < 50ms for common prefixes
+
+---
+
+### 📦 Inventory & Checkout Concurrency
+
+* Use **Optimistic Locking** or **Pessimistic Locking**
+* Prevent overselling under heavy load
+
+```sql
+UPDATE sku
+SET stock = stock - $qty, version = version + 1
+WHERE id = $skuId AND version = $expectedVersion AND stock >= $qty;
+```
+
+🧩 **Algo Used:** Version-based retry (Optimistic Locking)
+🎯 **Metric:** High consistency, minimal deadlocks
+
+---
+
+### 💳 Checkout Idempotency
+
+Avoid duplicate orders on double-click or retry.
+
+🧩 **DS Used:** Hash Set or Redis Key Store
+🎯 **Metric:** 0 duplicate orders
+
+---
+
+### 💬 Recommendations Engine (Phased)
+
+1. **Phase 1:** Tag + Popularity scoring
+2. **Phase 2:** Collaborative filtering (co-occurrence)
+3. **Phase 3:** Vector-based semantic similarity (ANN)
+
+🧩 **Algo Used:** Sorting, Graph Traversal, Cosine Similarity
+🎯 **Metric:** CTR (click-through rate) improvement
+
+---
+
+## 🔢 Key Data Structures to Implement
+
+| DS                 | Use Case              | Notes                                 |
+| ------------------ | --------------------- | ------------------------------------- |
+| **LRU Cache**      | Product reads         | Integrate with Redis for real metrics |
+| **Trie**           | Autocomplete          | In-memory, optional                   |
+| **Priority Queue** | Job scheduling        | For background workers                |
+| **HashSet**        | Idempotency           | Redis-based                           |
+| **Bloom Filter**   | Fast membership check | Optional                              |
+| **Inverted Index** | Search engine         | Postgres or Meilisearch               |
+| **Graph / ANN**    | Recommendations       | Later phase                           |
+
+📁 **Folder structure:**
+
+```
+src/
+  algorithms/
+    lru.ts
+    trie.ts
+    priority-queue.ts
+  services/
+    products.service.ts
+    checkout.service.ts
+```
+
+---
+
+## 🧪 Experiments & Instrumentation
+
+Use **Prometheus + K6 + Experiment Schema** to measure real performance.
+
+### 🔬 Example Experiment
+
+| Variant     | p95 Latency | DB QPS | Memory |
+| ----------- | ----------- | ------ | ------ |
+| Baseline    | 300ms       | 1000   | 0MB    |
+| + LRU Cache | 40ms        | 200    | +200MB |
+
+Save results to your `Experiment` model:
+
+```prisma
+model Experiment {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  variant     String
+  metric      String
+  value       Decimal  @db.Decimal(10,4)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+}
+```
+
+---
+
+## 🧭 Algorithm Selection Framework
+
+1. **Measure** baseline latency (Prometheus, K6)
+2. **Identify** the bottleneck (DB, CPU, Memory)
+3. **Choose** DS/Algo that reduces complexity
+4. **Implement** minimal change
+5. **Compare** before/after metrics
+6. **Persist** experiment results
+7. **Decide** to keep or rollback
+
+---
+
+## ⚙️ Implementation Guidelines (NestJS)
+
+* Keep DS implementations **pure TypeScript** (no framework coupling)
+* Use **Dependency Injection** for swappable strategies
+* Expose DS as **providers** under `AlgorithmsModule`
+* Inject into domain services (e.g., `ProductsService`)
+* Use **feature flags** (ENV) for A/B testing
+* Unit test algorithms independently
+
+Example:
+
+```ts
+@Module({
+  providers: [LruCache, ProductsService],
+  exports: [LruCache],
+})
+export class AlgorithmsModule {}
+```
+
+---
+
+## 🔍 Monitoring & Logging
+
+* **Prometheus** → latency, throughput, cache hit/miss, DB load
+* **Pino Logger** → structured, JSON logs
+* **Grafana** → visualize metrics and experiment outcomes
+
+---
+
+## 🧱 Scaling Considerations
+
+| Concern                | Approach                           |
+| ---------------------- | ---------------------------------- |
+| **High traffic**       | Redis cache, DB indexing           |
+| **Search scalability** | Meilisearch or Elastic             |
+| **Concurrency**        | Optimistic locking, Redis counters |
+| **Recommendations**    | Precompute scores, async jobs      |
+| **Monitoring**         | Centralized metrics via Prometheus |
+
+---
+
+## 🧰 Tooling Summary
+
+| Tool           | Purpose            |
+| -------------- | ------------------ |
+| **Prometheus** | Collect metrics    |
+| **Grafana**    | Visualize metrics  |
+| **K6**         | Load testing       |
+| **Postman**    | API testing        |
+| **Redis**      | Cache & counters   |
+| **PostgreSQL** | Persistent storage |
+
+---
+
+## 🧠 Final Principles
+
+✅ **Measure, Don’t Guess** — benchmark before & after every optimization.
+✅ **Simple First** — add complexity only when metrics justify it.
+✅ **Isolate Algorithms** — keep logic testable & swappable.
+✅ **Monitor Everything** — latency, QPS, errors, cache hits.
+✅ **Iterate & Document** — record each experiment in `experiments` table.
+
+---
+
+> 💬 “Data Structures and Algorithms aren’t just for coding interviews —
+> they’re the foundation of *how* your system performs in production.”
+
+---
+
+📚 **Next Steps**
+
+1. Implement `src/algorithms/lru.ts`
+2. Add instrumentation in `ProductsService`
+3. Run `k6 run load-tests/product-get.js`
+4. Save metrics to `experiments` table
+5. Visualize in Grafana
+
+---
+
+🧩 *Document Owner:* Nishchal Singh
+🛠️ *Project:* E-commerce Backend (NestJS, PostgreSQL, Redis, Prometheus)
+📅 *Last Updated:* November 2025
+
+```

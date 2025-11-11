@@ -10,6 +10,11 @@
  * - POST /auth/refresh - Refresh access token (public, uses cookie)
  * - POST /auth/logout - Logout user (protected)
  * - GET /auth/me - Get current user profile (protected)
+ * - GET /auth/verify - Verify email address (public, from email link)
+ * - POST /auth/verify - Verify email address (public, from request body)
+ * - POST /auth/resend-verification - Resend verification email (public)
+ * - POST /auth/forgot-password - Request password reset (public)
+ * - POST /auth/reset-password - Reset password with token (public)
  *
  * Security:
  * - Public endpoints: register, login, refresh (no authentication required)
@@ -28,12 +33,16 @@ import {
   Res,
   Req,
   UseGuards,
+  Query,
+  BadRequestException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -306,6 +315,182 @@ export class AuthController {
         role: user.role,
         isEmailVerified: user.isEmailVerified,
       },
+    };
+  }
+
+  /**
+   * GET /auth/verify
+   * Verify user's email address using verification token (from email link)
+   *
+   * This endpoint is used when users click the verification link in their email.
+   * Email links typically use GET requests, so we support both GET and POST.
+   *
+   * Flow:
+   * 1. Extract token from query parameter
+   * 2. Validate token signature and expiration
+   * 3. Update user's isEmailVerified to true
+   * 4. Send welcome email
+   *
+   * Security:
+   * - Token is signed JWT (not guessable)
+   * - Token expires after 24 hours
+   * - Token type verified (prevents token reuse)
+   * - Idempotent: already verified is success
+   *
+   * @param queryToken - Verification token from query parameter (email link)
+   * @returns Success response
+   */
+  @Public()
+  @Get('verify')
+  @HttpCode(HttpStatus.OK)
+  async verifyEmailGet(@Query('token') queryToken: string) {
+    if (!queryToken) {
+      throw new BadRequestException('Verification token is required');
+    }
+
+    await this.authService.verifyEmail(queryToken);
+
+    return {
+      success: true,
+      message: 'Email verified successfully',
+    };
+  }
+
+  /**
+   * POST /auth/verify
+   * Verify user's email address using verification token (from request body)
+   *
+   * This endpoint allows programmatic verification (e.g., from mobile apps).
+   * Email links typically use GET, but POST is also supported for flexibility.
+   *
+   * Flow:
+   * 1. Extract token from request body
+   * 2. Validate token signature and expiration
+   * 3. Update user's isEmailVerified to true
+   * 4. Send welcome email
+   *
+   * Security:
+   * - Token is signed JWT (not guessable)
+   * - Token expires after 24 hours
+   * - Token type verified (prevents token reuse)
+   * - Idempotent: already verified is success
+   *
+   * @param verifyDto - Verification token (from body)
+   * @returns Success response
+   */
+  @Public()
+  @Post('verify')
+  @HttpCode(HttpStatus.OK)
+  async verifyEmailPost(@Body() verifyDto: VerifyEmailDto) {
+    if (!verifyDto.token) {
+      throw new BadRequestException('Verification token is required');
+    }
+
+    await this.authService.verifyEmail(verifyDto.token);
+
+    return {
+      success: true,
+      message: 'Email verified successfully',
+    };
+  }
+
+  /**
+   * POST /auth/resend-verification
+   * Resend email verification email
+   *
+   * Flow:
+   * 1. Find user by email
+   * 2. Check if email is already verified
+   * 3. Generate new verification token
+   * 4. Send verification email
+   *
+   * Security:
+   * - Generic response prevents email enumeration
+   * - Only sends if email is not already verified
+   *
+   * @param body - Request body containing email
+   * @returns Success response (always, to prevent email enumeration)
+   */
+  @Public()
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  async resendVerification(@Body('email') email: string) {
+    if (!email) {
+      throw new BadRequestException('Email is required');
+    }
+
+    // Resend verification email
+    // This method handles email enumeration prevention internally
+    await this.authService.resendVerificationEmail(email);
+
+    // Always return success to prevent email enumeration
+    return {
+      success: true,
+      message: 'If the email exists and is not verified, a verification email has been sent',
+    };
+  }
+
+  /**
+   * POST /auth/forgot-password
+   * Request password reset (forgot password)
+   *
+   * Flow:
+   * 1. Find user by email
+   * 2. Generate password reset token (1-hour expiry)
+   * 3. Send password reset email
+   *
+   * Security:
+   * - Generic response prevents email enumeration
+   * - Token is signed JWT (not guessable)
+   * - Token expires after 1 hour
+   *
+   * @param forgotPasswordDto - Request body containing email
+   * @returns Success response (always, to prevent email enumeration)
+   */
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    // Request password reset
+    // This method handles email enumeration prevention internally
+    await this.authService.forgotPassword(forgotPasswordDto.email);
+
+    // Always return success to prevent email enumeration
+    return {
+      success: true,
+      message: 'If the email exists, a password reset link has been sent',
+    };
+  }
+
+  /**
+   * POST /auth/reset-password
+   * Reset user's password using reset token
+   *
+   * Flow:
+   * 1. Extract token and new password from request
+   * 2. Validate token signature and expiration
+   * 3. Hash new password
+   * 4. Update user's password
+   * 5. Invalidate all refresh tokens (force re-login)
+   *
+   * Security:
+   * - Token signature verified (prevents tampering)
+   * - Token expiration checked (1 hour)
+   * - New password is hashed before storage
+   * - All refresh tokens invalidated (security best practice)
+   *
+   * @param resetPasswordDto - Reset token and new password
+   * @returns Success response
+   */
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    await this.authService.resetPassword(resetPasswordDto.token, resetPasswordDto.password);
+
+    return {
+      success: true,
+      message: 'Password reset successfully. Please log in with your new password',
     };
   }
 }

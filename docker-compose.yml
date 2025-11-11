@@ -79,6 +79,9 @@ services:
       # JWT (use strong secrets in production)
       JWT_SECRET: dev-secret-change-in-production
       JWT_EXPIRES_IN: 3600
+      JWT_REFRESH_EXPIRES_IN: 604800
+      # HMAC secret for refresh token hashing (use strong secret in production)
+      HMAC_SECRET: dev-hmac-secret-change-in-production
       # Cache settings
       USE_IN_MEMORY_CACHE: 'true'
       LRU_CACHE_MAX_SIZE: '100'

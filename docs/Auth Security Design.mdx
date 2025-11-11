@@ -821,7 +821,7 @@ This section tracks the current implementation progress for each phase defined i
 | **Phase 1: Core Infrastructure** | ✅ Complete | 100% |
 | **Phase 2: Authentication Core** | ✅ Complete | 100% |
 | **Phase 3: Email Infrastructure** | ✅ Complete | 100% |
-| **Phase 4: Email Verification & Password Reset** | ⏳ Pending | 0% |
+| **Phase 4: Email Verification & Password Reset** | ✅ Complete | 100% |
 | **Phase 5: Rate Limiting** | ⏳ Pending | 0% |
 | **Phase 6: Observability & Monitoring** | ⏳ Pending | 0% |
 | **Phase 7: Testing & Validation** | ⏳ Pending | 0% |
@@ -1106,24 +1106,119 @@ src/modules/mailer/
 
 ---
 
-## ⏳ Phase 4: Email Verification & Password Reset
+## ✅ Phase 4: Email Verification & Password Reset
 
-**Status:** Not yet started
+### 4.1 DTOs & Validation
+- ✅ `dto/verify-email.dto.ts` - Email verification token validation
+- ✅ `dto/password-reset.dto.ts` - Contains two DTOs:
+  - `ForgotPasswordDto` - Request password reset (email only)
+  - `ResetPasswordDto` - Complete password reset (token + new password)
 
-### 4.1 Email Verification Flow
-- [ ] Update `register()` - set `isEmailVerified = false`, generate verification token
-- [ ] Add `sendVerificationEmail()` to AuthService
-- [ ] Create `POST /auth/verify` endpoint
-- [ ] Create `POST /auth/resend-verification` endpoint
-- [ ] Create `dto/verify-email.dto.ts`
+### 4.2 Auth Service Updates
+- ✅ **File:** `src/modules/auth/auth.service.ts`
 
-### 4.2 Password Reset Flow
-- [ ] Create `POST /auth/forgot-password` endpoint
-- [ ] Create `POST /auth/reset-password` endpoint
-- [ ] Implement token invalidation (single-use)
-- [ ] Create `dto/password-reset.dto.ts`
+**New Methods:**
+- `sendVerificationEmail()` - Generates verification token and queues email
+- `verifyEmail()` - Validates token and marks email as verified
+- `resendVerificationEmail()` - Resends verification email
+- `forgotPassword()` - Generates reset token and sends email
+- `resetPassword()` - Validates token and updates password
+
+**Updated Methods:**
+- `register()` - Now sends verification email after registration
+
+**Security Features:**
+- ✅ JWT tokens for verification (24h expiry) and password reset (1h expiry)
+- ✅ Token type verification (prevents token reuse)
+- ✅ Email enumeration prevention (generic responses)
+- ✅ All refresh tokens invalidated on password reset
+- ✅ Idempotent operations (safe to retry)
+
+### 4.3 Controller & Routes
+- ✅ **File:** `src/modules/auth/auth.controller.ts`
+
+**New Endpoints:**
+| Endpoint | Method | Access | Description |
+|----------|--------|--------|-------------|
+| `/auth/verify` | GET | Public | Verify email (from email link) |
+| `/auth/verify` | POST | Public | Verify email (programmatic) |
+| `/auth/resend-verification` | POST | Public | Resend verification email |
+| `/auth/forgot-password` | POST | Public | Request password reset |
+| `/auth/reset-password` | POST | Public | Reset password with token |
+
+**Features:**
+- ✅ GET and POST support for email verification
+- ✅ Generic responses to prevent email enumeration
+- ✅ Clear error messages
+- ✅ Consistent response format
+
+### 4.4 Module Configuration
+- ✅ `auth.module.ts` updated:
+  - Imported `MailerModule` for email sending
+  - `MailerService` available in `AuthService`
+
+### 📁 File Structure (Phase 4 Updates)
+
+```
+src/modules/auth/
+├── dto/
+│   ├── register.dto.ts
+│   ├── login.dto.ts
+│   ├── refresh.dto.ts
+│   ├── verify-email.dto.ts          ← NEW
+│   └── password-reset.dto.ts        ← NEW
+├── auth.service.ts                   ← UPDATED (email methods)
+├── auth.controller.ts                ← UPDATED (new endpoints)
+└── auth.module.ts                    ← UPDATED (MailerModule import)
+```
+
+### ✅ Build Status
+- ✅ TypeScript compilation: **Success**
+- ✅ No linter errors
+- ✅ All dependencies resolved
+
+### ✨ Key Features Implemented
+
+**Email Verification Flow:**
+- ✅ Automatic email on registration
+- ✅ 24-hour token expiry
+- ✅ Welcome email after verification
+- ✅ Resend functionality
+
+**Password Reset Flow:**
+- ✅ Secure token generation
+- ✅ 1-hour token expiry
+- ✅ All sessions invalidated on reset
+- ✅ Email enumeration prevention
+
+**Security:**
+- ✅ Signed JWT tokens (not guessable)
+- ✅ Token type verification
+- ✅ Email enumeration prevention
+- ✅ Idempotent operations
+
+**Integration:**
+- ✅ Async email sending via BullMQ
+- ✅ Handlebars templates
+- ✅ Error handling and logging
+
+### 📋 Complete Endpoint List
+
+| Endpoint | Method | Access | Description |
+|----------|--------|--------|-------------|
+| `/auth/register` | POST | Public | Register user, sends verification email |
+| `/auth/login` | POST | Public | Authenticate user |
+| `/auth/refresh` | POST | Public | Refresh access token |
+| `/auth/logout` | POST | Protected | Logout user |
+| `/auth/me` | GET | Protected | Get current user profile |
+| `/auth/verify` | GET | Public | Verify email (from email link) |
+| `/auth/verify` | POST | Public | Verify email (programmatic) |
+| `/auth/resend-verification` | POST | Public | Resend verification email |
+| `/auth/forgot-password` | POST | Public | Request password reset |
+| `/auth/reset-password` | POST | Public | Reset password with token |
 
 ---
+
 
 ## ⏳ Phase 5: Rate Limiting
 
