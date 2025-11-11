@@ -11,7 +11,7 @@
  * - Consistent log format across the application
  */
 
-import { Injectable, LoggerService as NestLoggerService } from '@nestjs/common';
+import { Injectable, LoggerService as NestLoggerService, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import pino, { Logger as PinoLogger } from 'pino';
 import pinoPretty from 'pino-pretty';
@@ -27,7 +27,7 @@ export class Logger implements NestLoggerService {
   /**
    * Constructor initializes the Pino logger with configuration from environment variables.
    */
-  constructor(private readonly configService?: ConfigService) {
+  constructor(@Optional() @Inject(ConfigService) private readonly configService?: ConfigService) {
     const logLevel = configService?.get<string>('LOG_LEVEL', 'info');
     const logPretty = configService?.get<boolean>('LOG_PRETTY', true);
 

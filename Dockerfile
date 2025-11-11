@@ -39,6 +39,9 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
+# Install OpenSSL for Prisma (required for database connections)
+RUN apk add --no-cache openssl libc6-compat
+
 # Install production dependencies only
 # Note: We need prisma CLI for generation, so install it temporarily
 COPY package*.json ./

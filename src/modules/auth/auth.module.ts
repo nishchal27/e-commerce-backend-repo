@@ -32,6 +32,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { MailerModule } from '../mailer/mailer.module';
 
 /**
  * AuthModule provides authentication and authorization services
@@ -62,6 +63,10 @@ import { RolesGuard } from './guards/roles.guard';
       },
       inject: [ConfigService],
     }),
+
+    // MailerModule provides email sending functionality
+    // Used for sending verification and password reset emails
+    MailerModule,
   ],
   controllers: [AuthController],
   providers: [
