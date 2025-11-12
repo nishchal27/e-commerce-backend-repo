@@ -39,6 +39,7 @@ import {
   RateLimitType,
   RATE_LIMIT_KEY,
 } from './decorators/rate-limit.decorator';
+import { PrometheusService } from '../prometheus/prometheus.service';
 
 /**
  * RateLimitGuard enforces rate limiting on protected endpoints
@@ -48,6 +49,7 @@ export class RateLimitGuard implements CanActivate {
   constructor(
     private readonly rateLimitService: RateLimitService,
     private readonly reflector: Reflector,
+    private readonly prometheusService: PrometheusService,
   ) {}
 
   /**
@@ -84,6 +86,13 @@ export class RateLimitGuard implements CanActivate {
 
     // If rate limit exceeded, throw exception
     if (!result.allowed) {
+      // Get endpoint path for metrics
+      const endpoint = request.route?.path || request.path || 'unknown';
+      const rateLimitType = rateLimitOptions.type;
+
+      // Record rate limit block metric
+      this.prometheusService.recordRateLimitBlock(endpoint, rateLimitType);
+
       const retryAfter = Math.ceil((result.msBeforeNext || 0) / 1000); // Convert to seconds
       throw new HttpException(
         {

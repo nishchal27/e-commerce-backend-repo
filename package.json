@@ -25,6 +25,8 @@
     "prisma:studio": "prisma studio",
     "k6:baseline": "k6 run k6/baseline.js",
     "k6:cache": "k6 run k6/cache-test.js",
+    "k6:auth": "k6 run k6/auth-test.js",
+    "k6:auth-refresh": "k6 run k6/auth-refresh-test.js",
     "clear-rate-limit": "node scripts/clear-rate-limit.js"
   },
   "dependencies": {
