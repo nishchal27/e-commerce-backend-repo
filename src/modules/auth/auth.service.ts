@@ -24,6 +24,7 @@
  * - ConfigService: Environment configuration
  * - Logger: Structured logging
  * - MailerService: Email sending (verification, password reset)
+ * - PrometheusService: Metrics collection (login attempts, registrations, etc.)
  */
 
 import {
@@ -39,6 +40,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../lib/prisma/prisma.service';
 import { Logger } from '../../lib/logger';
 import { MailerService } from '../mailer/mailer.service';
+import { PrometheusService } from '../../common/prometheus/prometheus.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { TokenPair } from './interfaces/token-pair.interface';
@@ -75,6 +77,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly logger: Logger,
     private readonly mailerService: MailerService,
+    private readonly prometheusService: PrometheusService,
   ) {
     // Load configuration from environment variables
     const jwtSecret = this.configService.get<string>('JWT_SECRET');
@@ -127,7 +130,12 @@ export class AuthService {
     });
 
     if (existingUser) {
-      this.logger.warn(`Registration attempt with existing email: ${email}`, 'AuthService');
+      this.logger.warn(
+        `Registration attempt with existing email: ${email} (userId: ${existingUser.id})`,
+        'AuthService',
+      );
+      // Record failed registration metric
+      this.prometheusService.recordRegistration(false);
       throw new ConflictException('Email already registered');
     }
 
@@ -148,7 +156,13 @@ export class AuthService {
       },
     });
 
-    this.logger.log(`User registered: ${user.email} (${user.id})`, 'AuthService');
+    // Record successful registration metric
+    this.prometheusService.recordRegistration(true);
+
+    this.logger.log(
+      `User registered successfully: ${user.email} (userId: ${user.id}, role: ${user.role})`,
+      'AuthService',
+    );
 
     // Send verification email (async, don't wait for it)
     // Email is queued via BullMQ, so it won't block the registration response
@@ -199,6 +213,8 @@ export class AuthService {
     // Don't reveal whether email exists or password is wrong
     if (!user) {
       this.logger.warn(`Login attempt with non-existent email: ${email}`, 'AuthService');
+      // Record failed login attempt metric
+      this.prometheusService.recordLoginAttempt(false, 'user_not_found');
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -207,11 +223,22 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
-      this.logger.warn(`Failed login attempt for: ${email}`, 'AuthService');
+      this.logger.warn(
+        `Failed login attempt: invalid password for user ${user.email} (userId: ${user.id})`,
+        'AuthService',
+      );
+      // Record failed login attempt metric
+      this.prometheusService.recordLoginAttempt(false, 'invalid_credentials');
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    this.logger.log(`User logged in: ${user.email} (${user.id})`, 'AuthService');
+    // Record successful login attempt metric
+    this.prometheusService.recordLoginAttempt(true);
+
+    this.logger.log(
+      `User logged in successfully: ${user.email} (userId: ${user.id}, role: ${user.role})`,
+      'AuthService',
+    );
 
     // Generate tokens for authenticated user
     const tokens = await this.generateTokenPair(user.id, user.email, user.role);
@@ -257,6 +284,8 @@ export class AuthService {
 
     if (!storedToken) {
       this.logger.warn('Refresh attempt with invalid token hash', 'AuthService');
+      // Record failed token refresh metric
+      this.prometheusService.recordTokenRefresh(false);
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -266,7 +295,12 @@ export class AuthService {
       await this.prisma.refreshToken.delete({
         where: { id: storedToken.id },
       });
-      this.logger.warn(`Expired refresh token used: ${storedToken.id}`, 'AuthService');
+      this.logger.warn(
+        `Expired refresh token used: tokenId ${storedToken.id}, userId ${storedToken.userId}`,
+        'AuthService',
+      );
+      // Record failed token refresh metric
+      this.prometheusService.recordTokenRefresh(false);
       throw new UnauthorizedException('Refresh token expired');
     }
 
@@ -297,7 +331,13 @@ export class AuthService {
       }),
     ]);
 
-    this.logger.log(`Token refreshed for user: ${user.email}`, 'AuthService');
+    // Record successful token refresh metric
+    this.prometheusService.recordTokenRefresh(true);
+
+    this.logger.log(
+      `Token refreshed successfully for user: ${user.email} (userId: ${user.id})`,
+      'AuthService',
+    );
 
     // Return new access token and new refresh token
     // Controller will set new refresh token in cookie
@@ -464,7 +504,10 @@ export class AuthService {
       verificationUrl,
     });
 
-    this.logger.log(`Verification email queued for: ${email}`, 'AuthService');
+    this.logger.log(
+      `Verification email queued for user: ${email} (userId: ${userId})`,
+      'AuthService',
+    );
   }
 
   /**
@@ -521,7 +564,10 @@ export class AuthService {
 
       // Check if already verified
       if (user.isEmailVerified) {
-        this.logger.log(`Email already verified for user: ${user.email}`, 'AuthService');
+        this.logger.log(
+          `Email already verified for user: ${user.email} (userId: ${user.id}) - idempotent operation`,
+          'AuthService',
+        );
         return; // Idempotent: already verified is success
       }
 
@@ -531,7 +577,10 @@ export class AuthService {
         data: { isEmailVerified: true },
       });
 
-      this.logger.log(`Email verified for user: ${user.email}`, 'AuthService');
+      this.logger.log(
+        `Email verified successfully for user: ${user.email} (userId: ${user.id})`,
+        'AuthService',
+      );
 
       // Send welcome email (async, don't wait)
       this.mailerService
@@ -734,7 +783,10 @@ export class AuthService {
         data: { password: hashedPassword },
       });
 
-      this.logger.log(`Password reset completed for user: ${user.email}`, 'AuthService');
+      this.logger.log(
+        `Password reset completed successfully for user: ${user.email} (userId: ${user.id})`,
+        'AuthService',
+      );
 
       // Optional: Invalidate all refresh tokens for security
       // This forces user to log in again with new password
@@ -742,7 +794,10 @@ export class AuthService {
         where: { userId: user.id },
       });
 
-      this.logger.log(`All refresh tokens invalidated for user: ${user.email}`, 'AuthService');
+      this.logger.log(
+        `All refresh tokens invalidated after password reset for user: ${user.email} (userId: ${user.id})`,
+        'AuthService',
+      );
     } catch (error) {
       // Handle JWT verification errors
       if (error.name === 'TokenExpiredError') {

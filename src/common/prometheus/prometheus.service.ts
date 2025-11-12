@@ -38,6 +38,18 @@ export class PrometheusService {
   // Gauge metric: Process CPU time in seconds
   public readonly processCpuGauge: PromClient.Gauge<string>;
 
+  // Auth-specific metrics
+  // Counter: Total login attempts (successful and failed)
+  public readonly authLoginAttemptsCounter: PromClient.Counter<string>;
+  // Counter: Failed login attempts
+  public readonly authLoginFailuresCounter: PromClient.Counter<string>;
+  // Counter: Token refresh operations
+  public readonly authTokenRefreshesCounter: PromClient.Counter<string>;
+  // Counter: User registrations
+  public readonly authRegistrationsCounter: PromClient.Counter<string>;
+  // Counter: Rate limit blocks
+  public readonly rateLimitBlocksCounter: PromClient.Counter<string>;
+
   constructor(private readonly configService: ConfigService) {
     // Create a new registry to hold all metrics
     this.register = new PromClient.Registry();
@@ -76,6 +88,51 @@ export class PrometheusService {
     this.processCpuGauge = new PromClient.Gauge({
       name: 'process_cpu_seconds_total',
       help: 'Total user and system CPU time spent in seconds',
+      registers: [this.register],
+    });
+
+    // Initialize auth login attempts counter
+    // Labels: status (success, failure)
+    this.authLoginAttemptsCounter = new PromClient.Counter({
+      name: 'auth_login_attempts_total',
+      help: 'Total number of login attempts',
+      labelNames: ['status'], // 'success' or 'failure'
+      registers: [this.register],
+    });
+
+    // Initialize auth login failures counter
+    // Labels: reason (invalid_credentials, user_not_found, etc.)
+    this.authLoginFailuresCounter = new PromClient.Counter({
+      name: 'auth_login_failures_total',
+      help: 'Total number of failed login attempts',
+      labelNames: ['reason'], // Reason for failure (e.g., 'invalid_credentials', 'user_not_found')
+      registers: [this.register],
+    });
+
+    // Initialize auth token refreshes counter
+    // Labels: status (success, failure)
+    this.authTokenRefreshesCounter = new PromClient.Counter({
+      name: 'auth_token_refreshes_total',
+      help: 'Total number of token refresh operations',
+      labelNames: ['status'], // 'success' or 'failure'
+      registers: [this.register],
+    });
+
+    // Initialize auth registrations counter
+    // Labels: status (success, failure)
+    this.authRegistrationsCounter = new PromClient.Counter({
+      name: 'auth_registrations_total',
+      help: 'Total number of user registrations',
+      labelNames: ['status'], // 'success' or 'failure'
+      registers: [this.register],
+    });
+
+    // Initialize rate limit blocks counter
+    // Labels: endpoint (e.g., '/auth/login'), type (e.g., 'login')
+    this.rateLimitBlocksCounter = new PromClient.Counter({
+      name: 'rate_limit_blocks_total',
+      help: 'Total number of requests blocked by rate limiting',
+      labelNames: ['endpoint', 'type'], // Endpoint path and rate limit type
       registers: [this.register],
     });
 
@@ -141,6 +198,65 @@ export class PrometheusService {
       // Update memory gauge (resident set size in bytes)
       this.processMemoryGauge.set(memUsage.rss);
     }, 5000); // Update every 5 seconds
+  }
+
+  /**
+   * Record a login attempt.
+   * Called by AuthService when a login attempt is made.
+   *
+   * @param success - Whether the login was successful
+   * @param reason - Reason for failure (if unsuccessful)
+   */
+  recordLoginAttempt(success: boolean, reason?: string): void {
+    // Increment login attempts counter
+    this.authLoginAttemptsCounter.inc({
+      status: success ? 'success' : 'failure',
+    });
+
+    // If failed, increment failures counter with reason
+    if (!success) {
+      this.authLoginFailuresCounter.inc({
+        reason: reason || 'unknown',
+      });
+    }
+  }
+
+  /**
+   * Record a token refresh operation.
+   * Called by AuthService when a token refresh is attempted.
+   *
+   * @param success - Whether the refresh was successful
+   */
+  recordTokenRefresh(success: boolean): void {
+    this.authTokenRefreshesCounter.inc({
+      status: success ? 'success' : 'failure',
+    });
+  }
+
+  /**
+   * Record a user registration.
+   * Called by AuthService when a user registers.
+   *
+   * @param success - Whether the registration was successful
+   */
+  recordRegistration(success: boolean): void {
+    this.authRegistrationsCounter.inc({
+      status: success ? 'success' : 'failure',
+    });
+  }
+
+  /**
+   * Record a rate limit block.
+   * Called by RateLimitGuard when a request is blocked due to rate limiting.
+   *
+   * @param endpoint - The endpoint path (e.g., '/auth/login')
+   * @param type - The rate limit type (e.g., 'login', 'register')
+   */
+  recordRateLimitBlock(endpoint: string, type: string): void {
+    this.rateLimitBlocksCounter.inc({
+      endpoint,
+      type,
+    });
   }
 }
 
