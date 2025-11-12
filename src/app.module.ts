@@ -21,6 +21,7 @@ import { LoggerModule } from './lib/logger/logger.module';
 import { PrismaModule } from './lib/prisma/prisma.module';
 import { RedisModule } from './lib/redis/redis.module';
 import { PrometheusModule } from './common/prometheus/prometheus.module';
+import { RateLimitModule } from './common/rate-limiting/rate-limit.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { PrometheusMiddleware } from './common/prometheus/prometheus.middleware';
 
@@ -56,6 +57,9 @@ import { ExperimentsModule } from './modules/experiments/experiments.module';
 
     // Prometheus module - exposes /metrics endpoint and HTTP metrics middleware
     PrometheusModule,
+
+    // Rate limiting module - provides Redis-backed rate limiting
+    RateLimitModule,
 
     // Feature modules
     ProductsModule,

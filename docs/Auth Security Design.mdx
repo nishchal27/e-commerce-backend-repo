@@ -822,7 +822,7 @@ This section tracks the current implementation progress for each phase defined i
 | **Phase 2: Authentication Core** | ✅ Complete | 100% |
 | **Phase 3: Email Infrastructure** | ✅ Complete | 100% |
 | **Phase 4: Email Verification & Password Reset** | ✅ Complete | 100% |
-| **Phase 5: Rate Limiting** | ⏳ Pending | 0% |
+| **Phase 5: Rate Limiting** | ✅ Complete | 100% |
 | **Phase 6: Observability & Monitoring** | ⏳ Pending | 0% |
 | **Phase 7: Testing & Validation** | ⏳ Pending | 0% |
 | **Phase 8: Documentation & Cleanup** | ⏳ Pending | 0% |
@@ -1220,18 +1220,122 @@ src/modules/auth/
 ---
 
 
-## ⏳ Phase 5: Rate Limiting
+## ✅ Phase 5: Rate Limiting
 
-**Status:** Not yet started
+### 5.1 Package Installation
+- ✅ Installed `rate-limiter-flexible` for Redis-backed rate limiting
 
-### 5.1 Rate Limiting Module
-- [ ] Install `rate-limiter-flexible`
-- [ ] Create rate limiting module, service, and guard
-- [ ] Implement Redis-backed rate limiters
+### 5.2 Rate Limiting Module
+- ✅ **Directory:** `src/common/rate-limiting/`
 
-### 5.2 Apply Rate Limits
-- [ ] Create `@RateLimit()` decorator
-- [ ] Apply rate limits to auth endpoints
+**Files Created:**
+- ✅ `rate-limit.service.ts` - Service managing rate limiters
+- ✅ `rate-limit.guard.ts` - Guard enforcing rate limits
+- ✅ `decorators/rate-limit.decorator.ts` - `@RateLimit()` decorator
+- ✅ `rate-limit.module.ts` - Module configuration
+
+### 5.3 Rate Limiting Service Features
+- ✅ **File:** `src/common/rate-limiting/rate-limit.service.ts`
+
+**Pre-configured Rate Limiters:**
+| Type | Limit | Window | Key Strategy | Block Duration |
+|------|-------|--------|--------------|----------------|
+| **Login** | 5 requests | 1 minute | IP + Email | 15 minutes |
+| **Refresh** | 30 requests | 1 minute | IP + Token | N/A |
+| **Register** | 3 requests | 1 hour | IP | N/A |
+| **Password Reset** | 3 requests | 1 hour | IP + Email | N/A |
+| **Email Verify** | 5 requests | 1 hour | IP + Email | N/A |
+| **General API** | 100 requests | 1 minute | IP | N/A |
+
+**Features:**
+- ✅ Redis-backed (distributed, consistent across instances)
+- ✅ Configurable via environment variables
+- ✅ Multiple key strategies (IP, IP+Email, IP+Token)
+- ✅ Rate limit headers in responses (`X-RateLimit-*`)
+- ✅ Error handling and logging
+
+### 5.4 Rate Limiting Guard
+- ✅ **File:** `src/common/rate-limiting/rate-limit.guard.ts`
+
+**Functionality:**
+- ✅ Reads `@RateLimit()` decorator metadata
+- ✅ Generates rate limit keys based on request
+- ✅ Consumes rate limit attempts
+- ✅ Throws `429 Too Many Requests` when limit exceeded
+- ✅ Adds rate limit headers to responses
+
+### 5.5 Applied to Auth Endpoints
+- ✅ All auth endpoints are rate limited:
+
+| Endpoint | Method | Rate Limit | Key Strategy |
+|----------|--------|------------|--------------|
+| `/auth/register` | POST | 3/hour | IP |
+| `/auth/login` | POST | 5/minute | IP + Email (15-min block) |
+| `/auth/refresh` | POST | 30/minute | IP + Token |
+| `/auth/resend-verification` | POST | 5/hour | IP + Email |
+| `/auth/forgot-password` | POST | 3/hour | IP + Email |
+
+### 5.6 Environment Variables
+- ✅ Updated `env.example` with:
+  - `RATE_LIMIT_LOGIN_PER_MIN` - Login attempts per minute
+  - `RATE_LIMIT_LOGIN_BLOCK_DURATION` - Block duration after limit (seconds)
+  - `RATE_LIMIT_REFRESH_PER_MIN` - Refresh attempts per minute
+  - `RATE_LIMIT_REGISTER_PER_HR` - Registration attempts per hour
+  - `RATE_LIMIT_PASSWORD_RESET_PER_HR` - Password reset attempts per hour
+  - `RATE_LIMIT_EMAIL_VERIFY_PER_HR` - Email verification attempts per hour
+  - `RATE_LIMIT_GENERAL_PER_MIN` - General API requests per minute
+
+### 📁 File Structure (Phase 5)
+
+```
+src/common/rate-limiting/
+├── decorators/
+│   └── rate-limit.decorator.ts    ← @RateLimit() decorator
+├── rate-limit.service.ts          ← Rate limiting service
+├── rate-limit.guard.ts            ← Rate limiting guard
+└── rate-limit.module.ts           ← Module configuration
+```
+
+### ✅ Build Status
+- ✅ TypeScript compilation: **Success**
+- ✅ No linter errors
+- ✅ All dependencies resolved
+
+### ✨ Key Features Implemented
+
+**Protection Against Abuse:**
+- ✅ Brute force protection (login endpoint)
+- ✅ Registration spam prevention
+- ✅ Email enumeration prevention
+- ✅ Token refresh abuse prevention
+
+**Distributed Rate Limiting:**
+- ✅ Redis-backed (works across multiple instances)
+- ✅ Consistent limits across servers
+- ✅ Fast lookups (O(1) operations)
+
+**Client-Friendly:**
+- ✅ Rate limit headers in responses (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`)
+- ✅ Clear error messages
+- ✅ `Retry-After` header for blocked requests
+
+### 💻 Usage Example
+
+```typescript
+@Public()
+@RateLimit({ type: RateLimitType.LOGIN })
+@UseGuards(RateLimitGuard)
+@Post('login')
+async login(@Body() loginDto: LoginDto) {
+  // Endpoint is rate limited
+}
+```
+
+### 🔗 Integration
+- ✅ `RateLimitModule` imported in `AppModule` (global)
+- ✅ `RateLimitGuard` available throughout the application
+- ✅ Uses existing `RedisService` (no additional Redis connections)
+- ✅ Configurable via environment variables
 
 ---
 
