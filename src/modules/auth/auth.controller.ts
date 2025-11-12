@@ -47,6 +47,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { RequestUser } from './strategies/jwt.strategy';
+import { RateLimit, RateLimitType } from '../../common/rate-limiting/decorators/rate-limit.decorator';
+import { RateLimitGuard } from '../../common/rate-limiting/rate-limit.guard';
 
 /**
  * AuthController handles HTTP requests for authentication endpoints
@@ -91,12 +93,15 @@ export class AuthController {
    * - Email uniqueness enforced at database level
    * - User starts with isEmailVerified = false (requires email verification)
    * - Refresh token is in HttpOnly cookie (not accessible to JavaScript)
+   * - Rate limited: 3 requests per hour per IP
    *
    * @param registerDto - Registration data
    * @param response - Express response object (for setting cookies)
    * @returns Access token and user data
    */
   @Public()
+  @RateLimit({ type: RateLimitType.REGISTER })
+  @UseGuards(RateLimitGuard)
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(
@@ -145,12 +150,15 @@ export class AuthController {
    * - Generic error messages prevent email enumeration
    * - Password comparison uses timing-safe bcrypt.compare
    * - Failed login attempts are logged for monitoring
+   * - Rate limited: 5 requests per minute per IP+Email (blocks for 15 minutes after limit)
    *
    * @param loginDto - Login credentials
    * @param response - Express response object (for setting cookies)
    * @returns Access token
    */
   @Public()
+  @RateLimit({ type: RateLimitType.LOGIN })
+  @UseGuards(RateLimitGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -194,12 +202,15 @@ export class AuthController {
    * - Refresh token rotation prevents token reuse attacks
    * - Token is validated before rotation
    * - Expired tokens are rejected
+   * - Rate limited: 30 requests per minute per IP+Token
    *
    * @param request - Express request object (contains cookies)
    * @param response - Express response object (for setting cookies)
    * @returns New access token
    */
   @Public()
+  @RateLimit({ type: RateLimitType.REFRESH })
+  @UseGuards(RateLimitGuard)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(
@@ -407,11 +418,14 @@ export class AuthController {
    * Security:
    * - Generic response prevents email enumeration
    * - Only sends if email is not already verified
+   * - Rate limited: 5 requests per hour per IP+Email
    *
    * @param body - Request body containing email
    * @returns Success response (always, to prevent email enumeration)
    */
   @Public()
+  @RateLimit({ type: RateLimitType.EMAIL_VERIFY })
+  @UseGuards(RateLimitGuard)
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(@Body('email') email: string) {
@@ -443,11 +457,14 @@ export class AuthController {
    * - Generic response prevents email enumeration
    * - Token is signed JWT (not guessable)
    * - Token expires after 1 hour
+   * - Rate limited: 3 requests per hour per IP+Email
    *
    * @param forgotPasswordDto - Request body containing email
    * @returns Success response (always, to prevent email enumeration)
    */
   @Public()
+  @RateLimit({ type: RateLimitType.PASSWORD_RESET })
+  @UseGuards(RateLimitGuard)
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
