@@ -140,7 +140,8 @@ model Order {
   updatedAt      DateTime    @updatedAt
 
   // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments Payment[] // Payments associated with this order
 
   @@index([userId])
   @@index([status])
@@ -195,5 +196,61 @@ model Experiment {
   @@index([metric])
   @@index([createdAt])
   @@map("experiments")
+}
+
+// Payment model - represents a payment transaction
+// Tracks payment processing, status, and reconciliation with payment providers
+model Payment {
+  id                String        @id @default(uuid())
+  orderId           String
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  paymentIntentId   String        @unique // Payment intent ID from provider (Stripe, PayPal, etc.)
+  provider          String        // Payment provider name (e.g., "stripe", "paypal")
+  amount            Decimal       @db.Decimal(10, 2) // Amount in cents
+  currency          String        @default("USD")
+  status            PaymentStatus @default(PENDING)
+  idempotencyKey    String?       @unique // Prevents duplicate payment processing
+  webhookEventId    String?       @unique // Webhook event ID for idempotent webhook processing
+  metadata          Json?         // Additional payment metadata
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([paymentIntentId])
+  @@index([status])
+  @@index([idempotencyKey])
+  @@index([webhookEventId])
+  @@map("payments")
+}
+
+// Payment status enum
+enum PaymentStatus {
+  PENDING    // Payment created but not yet confirmed
+  PROCESSING // Payment is being processed
+  SUCCEEDED  // Payment succeeded
+  FAILED     // Payment failed
+  CANCELLED  // Payment cancelled
+  REFUNDED   // Payment refunded
+}
+
+// Outbox model - implements the Transactional Outbox pattern
+// Ensures reliable event publishing by storing events in the same database transaction
+// as the business logic, then publishing them asynchronously via a worker
+//
+// Pattern: Write event to outbox in same transaction → Worker polls and publishes → Mark as sent
+// This guarantees at-least-once delivery and prevents lost events
+model Outbox {
+  id        String   @id @default(uuid())
+  topic     String   // Event topic/channel (e.g., "order.created", "payment.succeeded")
+  payload   Json     // Full event envelope (event_id, event_type, timestamp, source, payload, meta)
+  createdAt DateTime @default(now()) // When event was created
+  sentAt    DateTime? // When event was successfully published (null = not yet sent)
+  attempts  Int      @default(0) // Number of publish attempts (for retry logic)
+  locked    Boolean  @default(false) // Lock flag for worker processing (prevents concurrent processing)
+
+  @@index([createdAt]) // Index for efficient polling of unsent events
+  @@index([sentAt]) // Index for cleanup of sent events
+  @@index([locked]) // Index for finding unlocked events
+  @@map("outbox")
 }
 
