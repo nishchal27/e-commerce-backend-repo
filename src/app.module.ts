@@ -15,6 +15,8 @@ import { AppService } from './app.service';
 import { ProductsModule } from './modules/products/products.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MailerModule } from './modules/mailer/mailer.module';
+import { OrdersModule } from './modules/orders/orders.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 // Common modules and utilities
 import { LoggerModule } from './lib/logger/logger.module';
@@ -22,6 +24,7 @@ import { PrismaModule } from './lib/prisma/prisma.module';
 import { RedisModule } from './lib/redis/redis.module';
 import { PrometheusModule } from './common/prometheus/prometheus.module';
 import { RateLimitModule } from './common/rate-limiting/rate-limit.module';
+import { EventsModule } from './common/events/events.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { PrometheusMiddleware } from './common/prometheus/prometheus.middleware';
 
@@ -61,10 +64,15 @@ import { ExperimentsModule } from './modules/experiments/experiments.module';
     // Rate limiting module - provides Redis-backed rate limiting
     RateLimitModule,
 
+    // Events module - provides Outbox pattern for reliable event publishing
+    EventsModule,
+
     // Feature modules
     ProductsModule,
     AuthModule,
     MailerModule, // Email sending infrastructure
+    OrdersModule, // Order management
+    PaymentsModule, // Payment processing
 
     // Experiments module - provides experiments feature
     ExperimentsModule,
@@ -72,12 +80,9 @@ import { ExperimentsModule } from './modules/experiments/experiments.module';
     // TODO: Add more modules as they are implemented:
     // - InventoryModule
     // - CartModule
-    // - CheckoutModule
-    // - OrdersModule
     // - ReviewsModule
     // - RecommendationsModule
     // - AnalyticsModule
-    // - WorkersModule (BullMQ)
   ],
   controllers: [AppController],
   providers: [AppService],

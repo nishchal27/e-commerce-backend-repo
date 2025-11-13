@@ -19,11 +19,12 @@ import { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
- * Request interface extension to include requestId property.
- * This allows TypeScript to recognize the requestId property on the request object.
+ * Request interface extension to include requestId and traceId properties.
+ * This allows TypeScript to recognize these properties on the request object.
  */
 export interface RequestWithId extends Request {
   requestId: string;
+  traceId?: string; // Optional: OpenTelemetry trace ID (if available)
 }
 
 /**
