@@ -21,6 +21,11 @@ This is an advanced e-commerce backend built with NestJS and TypeScript, designe
 - Docker and Docker Compose
 - k6 (for load testing - optional)
 
+workflow Diagram:
+
+![Alt text for the image](/public/images/HLD-core-workflow.png)
+
+
 ### Installation
 
 1. **Clone the repository**

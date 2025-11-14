@@ -1,0 +1,746 @@
+# 📦 Phase 1 Modules: Orders, Payments & Outbox Pattern
+
+> **Implementation Guide** — Complete documentation for Orders, Payments modules and the Transactional Outbox pattern implementation.
+
+**Tech Stack:** NestJS · PostgreSQL · Prisma · Redis · BullMQ · Stripe
+
+---
+
+## 📋 Table of Contents
+
+1. [Overview](#-overview)
+2. [Outbox Pattern](#-outbox-pattern)
+3. [Orders Module](#-orders-module)
+4. [Payments Module](#-payments-module)
+5. [Integration Guide](#-integration-guide)
+6. [API Reference](#-api-reference)
+7. [Testing](#-testing)
+8. [Troubleshooting](#-troubleshooting)
+
+---
+
+## 🧭 Overview
+
+Phase 1 implements the core e-commerce functionality: **Orders** and **Payments**, along with the **Transactional Outbox pattern** for reliable event publishing.
+
+### ✅ What's Implemented
+
+| Component | Status | Features |
+|-----------|--------|----------|
+| **Outbox Pattern** | ✅ Complete | Event storage, publisher worker, Redis Stream integration |
+| **Orders Module** | ✅ Complete | Order creation, status state machine, idempotency, events |
+| **Payments Module** | ✅ Complete | Stripe integration, webhooks, idempotency, events |
+
+### 🎯 Key Features
+
+- ✅ **Idempotent Operations** - Order and payment creation with idempotency keys
+- ✅ **Event-Driven** - Domain events via Outbox pattern (order.created, payment.succeeded, etc.)
+- ✅ **State Machine** - Order status transitions with validation
+- ✅ **Provider Abstraction** - Payment provider interface (Stripe implemented)
+- ✅ **Webhook Handling** - Idempotent webhook processing with signature verification
+- ✅ **Observability** - Prometheus metrics, structured logging, request correlation
+
+---
+
+## 📨 Outbox Pattern
+
+### 🎯 Purpose
+
+The **Transactional Outbox pattern** ensures reliable event publishing by storing events in the database within the same transaction as business logic. This guarantees **at-least-once delivery** and prevents lost events.
+
+### 🏗️ Architecture
+
+```
+┌─────────────────┐
+│  Business Logic │
+│  (Orders/Payments)│
+└────────┬────────┘
+         │
+         │ Same Transaction
+         ▼
+┌─────────────────┐
+│  Outbox Table   │  ← Events stored here
+└────────┬────────┘
+         │
+         │ Polling (5s interval)
+         ▼
+┌─────────────────┐
+│ OutboxPublisher │  ← Worker polls and publishes
+│    Processor    │
+└────────┬────────┘
+         │
+         │ Publish
+         ▼
+┌─────────────────┐
+│  Redis Stream   │  ← Event bus (can extend to Kafka)
+└─────────────────┘
+```
+
+### 📁 File Structure
+
+```
+src/common/events/
+├── events.module.ts                    # Events module definition
+├── outbox.service.ts                   # Write events to Outbox
+├── interfaces/
+│   └── domain-event.interface.ts        # Domain event structure
+└── processors/
+    └── outbox-publisher.processor.ts    # Worker that publishes events
+```
+
+### 🔧 Database Schema
+
+```prisma
+model Outbox {
+  id        String   @id @default(uuid())
+  topic     String   // Event topic (e.g., "order.created")
+  payload   Json     // Full event envelope
+  createdAt DateTime @default(now())
+  sentAt    DateTime? // When published (null = not yet sent)
+  attempts Int      @default(0) // Retry count
+  locked    Boolean  @default(false) // Lock for worker processing
+
+  @@index([createdAt]) // For polling unsent events
+  @@index([sentAt])    // For cleanup
+  @@index([locked])    // For finding unlocked events
+  @@map("outbox")
+}
+```
+
+### 💻 Usage
+
+#### 1. Write Event in Transaction
+
+```typescript
+import { OutboxService } from '../../common/events/outbox.service';
+
+// In your service method
+await this.prisma.$transaction(async (tx) => {
+  // 1. Create order
+  const order = await tx.order.create({
+    data: {
+      userId: user.id,
+      totalAmount: 99.99,
+      status: 'CREATED',
+      // ...
+    },
+  });
+
+  // 2. Write event to outbox (same transaction)
+  await this.outboxService.writeEvent({
+    topic: 'order.created',
+    event: this.outboxService.createEvent(
+      'order.created.v1',
+      {
+        order_id: order.id,
+        user_id: order.userId,
+        total_amount: order.totalAmount.toString(),
+        items: orderItems,
+      },
+      {
+        trace_id: traceId,
+        request_id: requestId,
+      },
+    ),
+    tx, // Use same transaction client
+  });
+
+  return order;
+});
+```
+
+#### 2. Event Structure
+
+All events follow this standard envelope:
+
+```typescript
+interface DomainEvent {
+  event_id: string;        // UUID v4
+  event_type: string;       // e.g., "order.created.v1"
+  timestamp: string;        // ISO 8601
+  source: string;           // "orders-service"
+  trace_id?: string;        // OpenTelemetry trace ID
+  request_id?: string;      // Request ID from middleware
+  payload: Record<string, any>;  // Domain-specific data
+  meta?: {
+    env?: string;
+    version?: string;
+    feature_flags?: string[];
+  };
+}
+```
+
+#### 3. Helper Methods
+
+```typescript
+// Create event with standard fields
+const event = outboxService.createEvent(
+  'order.created.v1',
+  { order_id: order.id, user_id: order.userId },
+  { trace_id: traceId, request_id: requestId }
+);
+
+// Write event (with or without transaction)
+await outboxService.writeEvent({
+  topic: 'order.created',
+  event,
+  tx, // Optional: use transaction client
+});
+```
+
+### 🔄 Outbox Publisher Worker
+
+The `OutboxPublisherProcessor` automatically:
+- Polls Outbox table every 5 seconds
+- Locks events to prevent concurrent processing
+- Publishes events to Redis Stream
+- Marks events as sent after successful publishing
+- Retries failed events (up to 5 attempts)
+
+**Configuration:**
+- Polling interval: 5 seconds (configurable)
+- Batch size: 100 events per poll
+- Max attempts: 5 (then goes to DLQ)
+
+### 📊 Events Published
+
+| Event Type | Topic | When Emitted | Payload |
+|------------|-------|--------------|---------|
+| `order.created.v1` | `order.created` | Order created | `order_id`, `user_id`, `total_amount`, `items` |
+| `order.status.updated.v1` | `order.updated` | Order status changed | `order_id`, `old_status`, `new_status` |
+| `payment.created.v1` | `payment.created` | Payment intent created | `payment_id`, `order_id`, `amount` |
+| `payment.succeeded.v1` | `payment.succeeded` | Payment confirmed | `payment_id`, `order_id`, `amount` |
+| `payment.failed.v1` | `payment.failed` | Payment failed | `payment_id`, `order_id`, `reason` |
+
+---
+
+## 🛒 Orders Module
+
+### 🎯 Purpose
+
+The Orders module handles order lifecycle management, from creation to delivery, with state machine validation and event emission.
+
+### 📁 File Structure
+
+```
+src/modules/orders/
+├── orders.module.ts                    # Module definition
+├── orders.service.ts                   # Business logic
+├── orders.controller.ts                # HTTP endpoints
+├── orders.repository.ts                # Data access layer
+├── dto/
+│   ├── create-order.dto.ts             # Order creation DTO
+│   ├── update-order-status.dto.ts       # Status update DTO
+│   └── order-response.dto.ts           # Response DTOs
+└── interfaces/
+    └── order-status.interface.ts        # Status transition logic
+```
+
+### 🔄 Order Status State Machine
+
+```
+CREATED → PAID → SHIPPED → DELIVERED
+   ↓
+CANCELLED (terminal)
+```
+
+**Valid Transitions:**
+- `CREATED` → `PAID` (when payment succeeds)
+- `CREATED` → `CANCELLED` (user/admin cancels)
+- `PAID` → `SHIPPED` (admin ships order)
+- `SHIPPED` → `DELIVERED` (admin marks delivered)
+- `PAID` → `CANCELLED` (admin cancels after payment)
+
+**Invalid transitions throw `BadRequestException`.**
+
+### 💻 Usage
+
+#### Create Order
+
+```typescript
+// POST /orders
+{
+  "items": [
+    { "sku": "TSHIRT-SM-RED", "quantity": 2 },
+    { "sku": "TSHIRT-MD-BLUE", "quantity": 1 }
+  ],
+  "idempotencyKey": "unique-key-123" // Optional: prevents duplicates
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "order-uuid",
+    "userId": "user-uuid",
+    "totalAmount": "99.99",
+    "status": "CREATED",
+    "items": [
+      {
+        "sku": "TSHIRT-SM-RED",
+        "quantity": 2,
+        "unitPrice": "29.99",
+        "totalPrice": "59.98"
+      }
+    ],
+    "createdAt": "2025-11-12T10:00:00.000Z"
+  }
+}
+```
+
+#### Get Order
+
+```typescript
+// GET /orders/:id
+// Returns order if user owns it or is admin/manager
+```
+
+#### Update Order Status
+
+```typescript
+// PATCH /orders/:id/status
+// Requires ADMIN or MANAGER role
+{
+  "status": "SHIPPED"
+}
+```
+
+### 🔐 Security
+
+- ✅ All endpoints require authentication (`@UseGuards(JwtAuthGuard)`)
+- ✅ Users can only access their own orders (enforced in service)
+- ✅ Status updates require `ADMIN` or `MANAGER` role
+- ✅ Idempotency keys prevent duplicate orders
+
+### 📊 Events Emitted
+
+1. **`order.created.v1`** - When order is created
+   ```json
+   {
+     "event_type": "order.created.v1",
+     "payload": {
+       "order_id": "order-uuid",
+       "user_id": "user-uuid",
+       "total_amount": "99.99",
+       "items": [...]
+     }
+   }
+   ```
+
+2. **`order.status.updated.v1`** - When status changes
+   ```json
+   {
+     "event_type": "order.status.updated.v1",
+     "payload": {
+       "order_id": "order-uuid",
+       "old_status": "CREATED",
+       "new_status": "PAID"
+     }
+   }
+   ```
+
+### 🧪 Testing
+
+```typescript
+// Unit test example
+describe('OrdersService', () => {
+  it('should create order with idempotency key', async () => {
+    const order = await service.create({
+      userId: 'user-123',
+      items: [{ sku: 'SKU-001', quantity: 1 }],
+      idempotencyKey: 'key-123',
+    });
+
+    // Second call with same key should return same order
+    const duplicate = await service.create({
+      userId: 'user-123',
+      items: [{ sku: 'SKU-001', quantity: 1 }],
+      idempotencyKey: 'key-123',
+    });
+
+    expect(duplicate.id).toBe(order.id);
+  });
+});
+```
+
+---
+
+## 💳 Payments Module
+
+### 🎯 Purpose
+
+The Payments module handles payment processing with provider abstraction, webhook handling, and integration with Orders module.
+
+### 📁 File Structure
+
+```
+src/modules/payments/
+├── payments.module.ts                  # Module definition
+├── payments.service.ts                 # Business logic
+├── payments.controller.ts              # HTTP endpoints
+├── providers/
+│   ├── payment-provider.interface.ts   # Provider interface
+│   └── stripe.provider.ts              # Stripe implementation
+└── dto/
+    ├── create-payment.dto.ts           # Payment creation DTO
+    ├── confirm-payment.dto.ts          # Payment confirmation DTO
+    └── refund-payment.dto.ts          # Refund DTO
+```
+
+### 🔧 Provider Abstraction
+
+The module uses a provider interface to support multiple payment providers:
+
+```typescript
+interface IPaymentProvider {
+  name: string;
+  createPaymentIntent(amount: number, currency: string, metadata: any): Promise<PaymentIntent>;
+  confirmPayment(paymentIntentId: string): Promise<PaymentStatus>;
+  refundPayment(paymentId: string, amount: number): Promise<RefundResult>;
+  verifyWebhookSignature(payload: string, signature: string): boolean;
+}
+```
+
+**Currently Implemented:**
+- ✅ Stripe (`StripeProvider`)
+
+**Future:**
+- ⏳ PayPal
+- ⏳ Square
+
+### 💻 Usage
+
+#### Create Payment Intent
+
+```typescript
+// POST /payments
+{
+  "orderId": "order-uuid",
+  "idempotencyKey": "payment-key-123" // Optional
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "payment-uuid",
+    "orderId": "order-uuid",
+    "amount": "99.99",
+    "currency": "USD",
+    "status": "PENDING",
+    "clientSecret": "pi_xxx_secret_xxx", // For Stripe
+    "paymentIntentId": "pi_xxx"
+  }
+}
+```
+
+#### Confirm Payment
+
+```typescript
+// POST /payments/:id/confirm
+{
+  "paymentMethodId": "pm_xxx" // Stripe payment method ID
+}
+```
+
+#### Webhook Handler
+
+```typescript
+// POST /payments/webhook
+// Public endpoint (signature verified)
+// Handles Stripe webhook events:
+// - payment_intent.succeeded
+// - payment_intent.payment_failed
+```
+
+**Webhook Flow:**
+1. Stripe sends webhook to `/payments/webhook`
+2. Signature is verified
+3. Event is processed idempotently (checks `webhookEventId`)
+4. Order status is updated if payment succeeds
+5. Event is emitted (`payment.succeeded.v1` or `payment.failed.v1`)
+
+### 🔐 Security
+
+- ✅ Payment creation requires authentication
+- ✅ Webhook signature verification (prevents spoofing)
+- ✅ Idempotent webhook processing (prevents duplicate processing)
+- ✅ Idempotency keys for payment creation
+
+### 📊 Events Emitted
+
+1. **`payment.created.v1`** - When payment intent is created
+2. **`payment.succeeded.v1`** - When payment succeeds (via webhook or confirmation)
+3. **`payment.failed.v1`** - When payment fails
+
+### 🧪 Testing
+
+```typescript
+// Integration test example
+describe('POST /payments/webhook', () => {
+  it('should process Stripe webhook idempotently', async () => {
+    const webhookPayload = {
+      type: 'payment_intent.succeeded',
+      data: { object: { id: 'pi_xxx', ... } },
+    };
+
+    // First call
+    await request(app)
+      .post('/payments/webhook')
+      .set('stripe-signature', validSignature)
+      .send(webhookPayload)
+      .expect(200);
+
+    // Second call (same webhook) should be idempotent
+    await request(app)
+      .post('/payments/webhook')
+      .set('stripe-signature', validSignature)
+      .send(webhookPayload)
+      .expect(200);
+
+    // Payment should only be processed once
+    const payment = await prisma.payment.findUnique({
+      where: { paymentIntentId: 'pi_xxx' },
+    });
+    expect(payment.status).toBe('SUCCEEDED');
+  });
+});
+```
+
+---
+
+## 🔗 Integration Guide
+
+### Adding Events to a New Module
+
+1. **Import EventsModule:**
+   ```typescript
+   import { EventsModule } from '../../common/events/events.module';
+
+   @Module({
+     imports: [EventsModule, ...],
+     // ...
+   })
+   ```
+
+2. **Inject OutboxService:**
+   ```typescript
+   constructor(
+     private readonly outboxService: OutboxService,
+     // ...
+   ) {}
+   ```
+
+3. **Write Event in Transaction:**
+   ```typescript
+   await this.prisma.$transaction(async (tx) => {
+     // Business logic
+     const entity = await tx.entity.create({ ... });
+
+     // Write event
+     await this.outboxService.writeEvent({
+       topic: 'entity.created',
+       event: this.outboxService.createEvent(
+         'entity.created.v1',
+         { entity_id: entity.id, ... },
+         { trace_id, request_id }
+       ),
+       tx,
+     });
+   });
+   ```
+
+### Adding a New Payment Provider
+
+1. **Implement Interface:**
+   ```typescript
+   @Injectable()
+   export class PayPalProvider implements IPaymentProvider {
+     name = 'paypal';
+     
+     async createPaymentIntent(...) { ... }
+     async confirmPayment(...) { ... }
+     // ...
+   }
+   ```
+
+2. **Register in Module:**
+   ```typescript
+   @Module({
+     providers: [
+       PaymentsService,
+       StripeProvider,
+       PayPalProvider, // Add here
+     ],
+   })
+   ```
+
+3. **Select in Service:**
+   ```typescript
+   const providerName = this.configService.get('PAYMENT_PROVIDER', 'stripe');
+   if (providerName === 'paypal') {
+     this.paymentProvider = this.paypalProvider;
+   }
+   ```
+
+---
+
+## 📚 API Reference
+
+### Orders Endpoints
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/orders` | ✅ Required | Create order |
+| `GET` | `/orders/:id` | ✅ Required | Get order by ID |
+| `GET` | `/orders` | ✅ Required | Get user's orders (paginated) |
+| `PATCH` | `/orders/:id/status` | ✅ Admin/Manager | Update order status |
+
+### Payments Endpoints
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/payments` | ✅ Required | Create payment intent |
+| `POST` | `/payments/:id/confirm` | ✅ Required | Confirm payment |
+| `POST` | `/payments/webhook` | 🔒 Signature | Process webhook |
+| `POST` | `/payments/:id/refund` | ✅ Admin | Refund payment |
+
+---
+
+## 🧪 Testing
+
+### Unit Tests
+
+```bash
+# Run unit tests
+npm test -- orders.service.spec.ts
+npm test -- payments.service.spec.ts
+```
+
+### Integration Tests
+
+```bash
+# Run E2E tests
+npm run test:e2e -- orders.e2e-spec.ts
+npm run test:e2e -- payments.e2e-spec.ts
+```
+
+### Load Testing
+
+```bash
+# k6 load test (create script)
+k6 run k6/orders-test.js
+k6 run k6/payments-test.js
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### Events Not Publishing
+
+**Symptoms:** Events in Outbox table but `sentAt` is null.
+
+**Solutions:**
+1. Check `OutboxPublisherProcessor` is running (should log polling activity)
+2. Check Redis connection (events published to Redis Stream)
+3. Check for errors in logs
+4. Verify `locked` flag is not stuck (should be false after processing)
+
+### Duplicate Orders
+
+**Symptoms:** Multiple orders created with same data.
+
+**Solutions:**
+1. Always use `idempotencyKey` in requests
+2. Check idempotency key is unique per user/operation
+3. Verify idempotency check in service is working
+
+### Payment Webhook Not Processing
+
+**Symptoms:** Webhook received but payment not updated.
+
+**Solutions:**
+1. Verify webhook signature (check `STRIPE_WEBHOOK_SECRET`)
+2. Check webhook event ID is unique (idempotency)
+3. Check logs for errors
+4. Verify order exists and is in correct status
+
+### Order Status Transition Fails
+
+**Symptoms:** Status update throws `BadRequestException`.
+
+**Solutions:**
+1. Check valid transition (see state machine diagram)
+2. Verify order is not in terminal status
+3. Check user has required role (ADMIN/MANAGER for status updates)
+
+---
+
+## 📊 Metrics
+
+### Prometheus Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `orders_created_total` | Counter | `status` | Orders created |
+| `orders_by_status` | Gauge | `status` | Current order count by status |
+| `payments_created_total` | Counter | `provider` | Payment intents created |
+| `payments_succeeded_total` | Counter | `provider` | Successful payments |
+| `payments_failed_total` | Counter | `provider`, `reason` | Failed payments |
+| `outbox_events_published_total` | Counter | `topic` | Events published |
+| `outbox_events_failed_total` | Counter | `topic` | Failed event publishing |
+
+### Query Examples
+
+```promql
+# Orders created today
+rate(orders_created_total[1h])
+
+# Payment success rate
+rate(payments_succeeded_total[5m]) / rate(payments_created_total[5m])
+
+# Events published per topic
+sum by (topic) (outbox_events_published_total)
+```
+
+---
+
+## 🚀 Future Enhancements
+
+### Orders Module
+- [ ] Order cancellation with refund logic
+- [ ] Order history and audit trail
+- [ ] Bulk order operations
+- [ ] Order search and filtering
+
+### Payments Module
+- [ ] PayPal provider implementation
+- [ ] Payment method management
+- [ ] Subscription payments
+- [ ] Payment reconciliation job
+
+### Outbox Pattern
+- [ ] Kafka integration (in addition to Redis Stream)
+- [ ] Dead Letter Queue (DLQ) for failed events
+- [ ] Event replay capability
+- [ ] Event versioning and schema evolution
+
+---
+
+## 📚 Related Documentation
+
+- [Auth Security Design](../Auth%20Security%20Design.mdx) - Authentication and security
+- [Modules Architecture](../../architecture/Modules-Architecture%20&%20Experimentation.mdx) - Overall architecture
+- [Quickstart Guide](../quickstart.md) - Getting started
+
+---
+
+**Last Updated:** 2025-11-12  
+**Status:** ✅ Phase 1 Complete  
+**Next Phase:** Inventory & Cart (Phase 2)
+

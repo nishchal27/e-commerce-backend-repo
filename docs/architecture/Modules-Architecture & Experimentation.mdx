@@ -36,6 +36,9 @@
 | **Products** | ✅ Complete | CRUD, Variants, Repository Pattern | - |
 | **Mailer** | ✅ Complete | BullMQ Queue, Templates, Provider Abstraction | - |
 | **Experiments** | ✅ Complete | Experiment Tracking, Metrics Collection | - |
+| **Orders** | ✅ Complete | Order lifecycle, State machine, Idempotency, Events | [Phase 1 Modules](../modules/Phase-1-Orders-Payments-Outbox.mdx) |
+| **Payments** | ✅ Complete | Stripe integration, Webhooks, Provider abstraction | [Phase 1 Modules](../modules/Phase-1-Orders-Payments-Outbox.mdx) |
+| **Outbox** | ✅ Complete | Transactional Outbox pattern, Event publishing | [Phase 1 Modules](../modules/Phase-1-Orders-Payments-Outbox.mdx) |
 
 ### Infrastructure & Common Services
 
@@ -107,44 +110,20 @@
 - ✅ Prometheus metrics
 - ✅ Rate limiting
 
-### Phase 1: Orders & Payments ⏳ **NEXT**
+### Phase 1: Orders & Payments ✅ **COMPLETE**
 
-**Priority:** High | **Dependencies:** None
+**Status:** All Phase 1 components implemented
 
-**Goals:**
-- Implement `orders` module with lifecycle management
-- Implement `payments` module with provider abstraction
-- Add `outbox` table for reliable event publishing
-- Emit domain events (`order.created.v1`, `order.paid.v1`)
+- ✅ Orders module with lifecycle management
+- ✅ Payments module with Stripe integration
+- ✅ Outbox pattern for reliable event publishing
+- ✅ Event-driven architecture foundation
+- ✅ Idempotency support
+- ✅ Webhook handling
 
-**Tasks:**
-- [ ] Create `OrdersModule` with service, controller, DTOs
-- [ ] Implement order status state machine (CREATED → PAID → SHIPPED → DELIVERED)
-- [ ] Add idempotency key handling for order creation
-- [ ] Create `PaymentsModule` with provider adapters (Stripe, PayPal)
-- [ ] Implement webhook handling with signature verification
-- [ ] Add `outbox` table to Prisma schema
-- [ ] Create outbox writer utility
-- [ ] Emit events via outbox pattern
+**Documentation:** [Phase 1 Modules Guide](../modules/Phase-1-Orders-Payments-Outbox.mdx)
 
-**Database Changes:**
-```prisma
-// Add to schema.prisma
-model Outbox {
-  id        String   @id @default(uuid())
-  topic     String
-  payload   Json
-  createdAt DateTime @default(now())
-  sentAt    DateTime?
-  attempts  Int      @default(0)
-  locked    Boolean  @default(false)
-  
-  @@index([createdAt])
-  @@map("outbox")
-}
-```
-
-### Phase 2: Inventory & Cart ⏳ **PENDING**
+### Phase 2: Inventory & Cart ⏳ **NEXT**
 
 **Priority:** High | **Dependencies:** Phase 1
 
