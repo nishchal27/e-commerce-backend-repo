@@ -25,6 +25,140 @@
 
 ### 1.1 Full E-Commerce Checkout Flow (When Fully Implemented)
 
+```mermaid
+sequenceDiagram
+  participant Client
+  participant API as NestJS API
+  participant Auth as Auth Service
+  participant Cart as Cart Service (Redis)
+  participant Orders as Orders Service (Postgres)
+  participant Outbox as Outbox Table
+  participant OutboxWorker as Outbox Publisher Worker
+  participant EventBus as Event Bus (Redis Stream / Kafka)
+  participant Inventory as Inventory Service
+  participant Payments as Payments Service
+  participant Stripe as Stripe API
+  participant Mailer as Mailer Service (BullMQ)
+  participant Analytics as Analytics Sink
+  participant Redis as Redis (Cache/Queue/RateLimit)
+  participant Workers as Background Workers
+
+  Note over Client,Workers: === Phase 1: Order Creation ===
+  
+  Client->>API: POST /orders {items, idempotencyKey}
+  API->>Auth: Validate JWT token
+  Auth-->>API: User authenticated
+  
+  API->>Orders: createOrder(items, userId, idempotencyKey)
+  Orders->>Orders: Validate items, calculate totals
+  Orders->>Orders: Check idempotency key (prevent duplicates)
+  
+  Orders->>Orders: begin transaction
+  Orders->>Orders: INSERT INTO orders (status: CREATED)
+  Orders->>Outbox: INSERT INTO outbox {topic: order.created, payload}
+  Orders->>Orders: commit transaction
+  
+  Orders-->>API: 201 {orderId, status: CREATED}
+  API-->>Client: 201 Created (orderId returned)
+  
+  Note over OutboxWorker,EventBus: === Phase 2: Event Publishing (Async) ===
+  
+  OutboxWorker->>Outbox: SELECT * WHERE sentAt IS NULL AND locked = false LIMIT 100 FOR UPDATE SKIP LOCKED
+  OutboxWorker->>Outbox: UPDATE locked = true
+  
+  OutboxWorker->>EventBus: XADD events:order.created * payload {event}
+  EventBus-->>OutboxWorker: Message ID
+  
+  OutboxWorker->>Outbox: UPDATE sentAt = NOW(), locked = false
+  
+  Note over Inventory,Analytics: === Phase 3: Event Consumption (Async) ===
+  
+  EventBus->>Inventory: order.created event → reserve stock
+  Inventory->>Redis: SET reservation:{sku}:{orderId} {qty} EX 900 NX
+  Inventory->>Inventory: INSERT INTO inventory_reservations
+  Inventory->>Outbox: INSERT INTO outbox {topic: inventory.reserved}
+  
+  EventBus->>Analytics: order.created → ingest to analytics
+  
+  Note over Client,Stripe: === Phase 4: Payment Processing ===
+  
+  Client->>API: POST /payments {orderId, amount, paymentMethodId}
+  API->>Payments: createPayment(orderId, amount)
+  Payments->>Orders: Validate order exists & status = CREATED
+  Payments->>Stripe: Create payment intent
+  Stripe-->>Payments: paymentIntentId, clientSecret
+  
+  Payments->>Payments: begin transaction
+  Payments->>Payments: INSERT INTO payments (status: PENDING)
+  Payments->>Outbox: INSERT INTO outbox {topic: payment.created}
+  Payments->>Payments: commit transaction
+  
+  Payments-->>API: 201 {paymentIntentId, clientSecret}
+  API-->>Client: 201 Created (clientSecret for frontend)
+  
+  Client->>API: POST /payments/:id/confirm {paymentMethodId}
+  API->>Payments: confirmPayment(paymentIntentId)
+  Payments->>Stripe: Confirm payment intent
+  Stripe-->>Payments: Payment succeeded
+  
+  Payments->>Payments: begin transaction
+  Payments->>Payments: UPDATE payments SET status = SUCCEEDED
+  Payments->>Orders: UPDATE orders SET status = PAID
+  Payments->>Inventory: UPDATE reservations SET status = CONSUMED
+  Payments->>Outbox: INSERT INTO outbox {topic: payment.succeeded}
+  Payments->>Outbox: INSERT INTO outbox {topic: order.paid}
+  Payments->>Payments: commit transaction
+  
+  Payments-->>API: 200 {status: SUCCEEDED}
+  API-->>Client: 200 OK (payment confirmed)
+  
+  Note over Stripe,Workers: === Phase 5: Webhook Processing (Alternative Flow) ===
+  
+  Stripe->>API: POST /payments/webhook (payment_intent.succeeded)
+  API->>Payments: processWebhook(payload, signature)
+  Payments->>Payments: Verify webhook signature
+  Payments->>Payments: Check idempotency (webhookEventId)
+  
+  Payments->>Payments: begin transaction
+  Payments->>Payments: UPDATE payments SET status = SUCCEEDED
+  Payments->>Orders: UPDATE orders SET status = PAID
+  Payments->>Outbox: INSERT INTO outbox {topic: payment.succeeded}
+  Payments->>Payments: commit transaction
+  
+  Payments-->>API: 200 OK
+  API-->>Stripe: 200 OK (webhook acknowledged)
+  
+  Note over OutboxWorker,Mailer: === Phase 6: Downstream Event Processing ===
+  
+  OutboxWorker->>EventBus: XADD events:payment.succeeded
+  OutboxWorker->>EventBus: XADD events:order.paid
+  
+  EventBus->>Mailer: payment.succeeded → send receipt email
+  Mailer->>Mailer: Queue email job (BullMQ)
+  Mailer->>Mailer: Render template (Handlebars)
+  Mailer->>Mailer: Send via SMTP/Ethereal
+  
+  EventBus->>Workers: order.paid → trigger fulfillment
+  Workers->>Workers: Generate shipping label
+  Workers->>Orders: UPDATE orders SET status = SHIPPED
+  Workers->>Outbox: INSERT INTO outbox {topic: order.shipped}
+  
+  EventBus->>Analytics: All events → ingest to ClickHouse/S3
+  
+  Note over OutboxWorker,EventBus: === Error Handling ===
+  
+  OutboxWorker->>Outbox: If publish fails: increment attempts
+  OutboxWorker->>Outbox: If attempts > 5: move to DLQ
+  OutboxWorker->>Workers: Alert on DLQ entries
+  
+  Note over Client,Workers: === Order Status Check ===
+  
+  Client->>API: GET /orders/:id
+  API->>Orders: findOne(orderId)
+  Orders-->>API: Order with current status
+  API-->>Client: 200 {orderId, status, items, ...}
+  ```
+
 ### 1.2 Simplified Current Implementation Flow
 
 ```mermaid
@@ -77,8 +211,6 @@ sequenceDiagram
   OutboxWorker->>EventBus: Publish payment.succeeded
   EventBus->>Mailer: Send receipt email
 ```
- Work flow diagram:
- ![Alt text for the image](/public/images/HLD-core-workflow.png)
 ---
 
 ## 2. Component Responsibilities
