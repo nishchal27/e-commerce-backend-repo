@@ -17,6 +17,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { MailerModule } from './modules/mailer/mailer.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { CartModule } from './modules/cart/cart.module';
 
 // Common modules and utilities
 import { LoggerModule } from './lib/logger/logger.module';
@@ -73,13 +75,13 @@ import { ExperimentsModule } from './modules/experiments/experiments.module';
     MailerModule, // Email sending infrastructure
     OrdersModule, // Order management
     PaymentsModule, // Payment processing
+    InventoryModule, // Inventory management with reservation strategies
+    CartModule, // Shopping cart management
 
     // Experiments module - provides experiments feature
     ExperimentsModule,
 
     // TODO: Add more modules as they are implemented:
-    // - InventoryModule
-    // - CartModule
     // - ReviewsModule
     // - RecommendationsModule
     // - AnalyticsModule
