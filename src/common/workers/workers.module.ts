@@ -21,6 +21,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { WebhookRetryProcessor } from './processors/webhook-retry.processor';
 import { PaymentReconciliationProcessor } from './processors/payment-reconciliation.processor';
+import { SearchIndexingProcessor } from './processors/search-indexing.processor';
 import { WorkerMonitoringService } from './services/worker-monitoring.service';
 import { DLQHandlerService } from './services/dlq-handler.service';
 import { WorkersController } from './workers.controller';
@@ -105,6 +106,28 @@ import { LoggerModule } from '../../lib/logger/logger.module';
       },
     }),
 
+    // Register search indexing queue
+    BullModule.registerQueue({
+      name: 'search-indexing',
+      defaultJobOptions: {
+        // Retry configuration
+        attempts: 3, // Retry up to 3 times
+        backoff: {
+          type: 'exponential',
+          delay: 2000, // Initial delay: 2 seconds
+        },
+        // Remove completed jobs after 1 hour
+        removeOnComplete: {
+          age: 3600,
+          count: 100,
+        },
+        // Keep failed jobs for 7 days
+        removeOnFail: {
+          age: 604800,
+        },
+      },
+    }),
+
     // Dependencies
     // Import PaymentsModule with forwardRef to avoid circular dependencies
     forwardRef(() => PaymentsModule), // For WebhookRetryProcessor
@@ -121,6 +144,7 @@ import { LoggerModule } from '../../lib/logger/logger.module';
     // Worker processors
     WebhookRetryProcessor,
     PaymentReconciliationProcessor,
+    SearchIndexingProcessor,
 
     // Worker monitoring and DLQ handling
     WorkerMonitoringService,

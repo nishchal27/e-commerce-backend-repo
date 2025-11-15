@@ -34,6 +34,12 @@ import { PrometheusMiddleware } from './common/prometheus/prometheus.middleware'
 // Experiments module
 import { ExperimentsModule } from './modules/experiments/experiments.module';
 
+// Search module
+import { SearchModule } from './modules/search/search.module';
+
+// Recommendations module
+import { RecommendationsModule } from './modules/recommendations/recommendations.module';
+
 /**
  * AppModule - Root module of the application
  *
@@ -79,13 +85,14 @@ import { ExperimentsModule } from './modules/experiments/experiments.module';
     InventoryModule, // Inventory management with reservation strategies
     CartModule, // Shopping cart management
     WorkersModule, // Background workers (webhook retry, payment reconciliation)
+    SearchModule, // Product search functionality
+    RecommendationsModule, // Product recommendations with A/B testing
 
     // Experiments module - provides experiments feature
     ExperimentsModule,
 
     // TODO: Add more modules as they are implemented:
     // - ReviewsModule
-    // - RecommendationsModule
     // - AnalyticsModule
   ],
   controllers: [AppController],

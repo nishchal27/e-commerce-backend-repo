@@ -39,6 +39,11 @@
 | **Orders** | ✅ Complete | Order lifecycle, State machine, Idempotency, Events | [Phase 1 Modules](../modules/Phase-1-Orders-Payments-Outbox.mdx) |
 | **Payments** | ✅ Complete | Stripe integration, Webhooks, Provider abstraction | [Phase 1 Modules](../modules/Phase-1-Orders-Payments-Outbox.mdx) |
 | **Outbox** | ✅ Complete | Transactional Outbox pattern, Event publishing | [Phase 1 Modules](../modules/Phase-1-Orders-Payments-Outbox.mdx) |
+| **Inventory** | ✅ Complete | Reservation APIs, Optimistic/Pessimistic strategies, A/B testing | Phase 2 |
+| **Cart** | ✅ Complete | Redis-backed storage, Cart merge, TTL expiration | Phase 2 |
+| **Workers** | ✅ Complete | Webhook retry, Payment reconciliation, Monitoring, DLQ | [Phase 3 Modules](../modules/Phase-3-Background-Workers.mdx) |
+| **Search** | ✅ Complete | Full-text search, Filtering, Pagination, Analytics | [Phase 4 Modules](../modules/Phase-4-Search-Recommendations.mdx) |
+| **Recommendations** | ✅ Complete | Multiple strategies, A/B testing, Click tracking | [Phase 4 Modules](../modules/Phase-4-Search-Recommendations.mdx) |
 
 ### Infrastructure & Common Services
 
@@ -58,14 +63,15 @@
 - ✅ `RefreshToken` - HMAC-hashed refresh tokens
 - ✅ `Product` - Product catalog
 - ✅ `ProductVariant` - SKUs, pricing, stock
-- ✅ `Order` - Order lifecycle (schema ready)
-- ✅ `InventoryReservation` - Stock reservations (schema ready)
+- ✅ `Order` - Order lifecycle management
+- ✅ `Payment` - Payment transactions and status tracking
+- ✅ `InventoryReservation` - Stock reservations
+- ✅ `Outbox` - Event publishing (transactional outbox pattern)
 - ✅ `Review` - Product reviews (schema ready)
 - ✅ `Experiment` - Experiment tracking
 
 **Pending Implementation:**
-- ⏳ `outbox` table (for event publishing)
-- ⏳ `experiment_assignments` table (for A/B testing)
+- ⏳ `experiment_assignments` table (for A/B testing assignment tracking)
 
 ---
 
@@ -123,62 +129,48 @@
 
 **Documentation:** [Phase 1 Modules Guide](../modules/Phase-1-Orders-Payments-Outbox.mdx)
 
-### Phase 2: Inventory & Cart ⏳ **NEXT**
+### Phase 2: Inventory & Cart ✅ **COMPLETE**
 
-**Priority:** High | **Dependencies:** Phase 1
+**Status:** All Phase 2 components implemented
 
-**Goals:**
-- Implement `inventory` module with reservation APIs
-- Implement `cart` module with merge logic
-- Add reservation strategies (optimistic vs pessimistic) for experiments
+- ✅ Inventory module with reservation APIs (`reserve`, `commit`, `release`)
+- ✅ Stock management and multi-warehouse support
+- ✅ Cart module for anonymous and authenticated carts
+- ✅ Cart merge logic (anonymous → user) with deterministic rules
+- ✅ Reservation strategies (optimistic and pessimistic)
+- ✅ A/B testing integration for reservation strategies
+- ✅ Comprehensive metrics and observations tracking
 
-**Tasks:**
-- [ ] Create `InventoryModule` with reservation APIs (`reserve`, `commit`, `release`)
-- [ ] Implement stock management and multi-warehouse support
-- [ ] Create `CartModule` for anonymous and authenticated carts
-- [ ] Implement cart merge logic (anonymous → user) with deterministic rules
-- [ ] Add feature flag for reservation strategies
-- [ ] Implement pessimistic locking strategy
-- [ ] Implement optimistic locking strategy
-- [ ] Add integration tests for reservation strategies
+**Documentation:** Phase 2 implementation complete
 
-**Note:** `InventoryReservation` model already exists in schema.
+### Phase 3: Background Workers ✅ **COMPLETE**
 
-### Phase 3: Background Workers ⏳ **PENDING**
+**Status:** All Phase 3 components implemented
 
-**Priority:** Medium | **Dependencies:** Phase 1
+- ✅ Outbox publisher worker (publish events to Redis Stream)
+- ✅ Webhook retry worker with exponential backoff
+- ✅ Payment reconciliation worker
+- ✅ Worker monitoring and health checks
+- ✅ Dead letter queue (DLQ) handling
+- ✅ Comprehensive Prometheus metrics
+- ✅ HTTP endpoints for monitoring and DLQ management
 
-**Goals:**
-- Expand BullMQ workers for async processing
-- Implement outbox publisher worker
-- Add webhook retry mechanism
+**Documentation:** [Phase 3 Modules](../modules/Phase-3-Background-Workers.mdx)
 
-**Tasks:**
-- [ ] Create outbox publisher worker (publish events to Redis Stream/Kafka)
-- [ ] Implement webhook retry worker with exponential backoff
-- [ ] Add payment reconciliation worker
-- [ ] Create worker monitoring and health checks
-- [ ] Add dead letter queue (DLQ) handling
+### Phase 4: Search & Recommendations ✅ **COMPLETE**
 
-**Note:** BullMQ is already configured for mailer. Extend for other workers.
+**Status:** All Phase 4 components implemented
 
-### Phase 4: Search & Recommendations ⏳ **PENDING**
+- ✅ Search module with PostgreSQL full-text search (ILIKE)
+- ✅ Search indexing worker (BullMQ) for async product indexing
+- ✅ Recommendation service with multiple strategies (popularity, co-occurrence, content-based)
+- ✅ Recommendation endpoints with A/B testing integration
+- ✅ Search analytics and Prometheus metrics
+- ✅ Comprehensive event emission for analytics
 
-**Priority:** Medium | **Dependencies:** Phase 2
+**Documentation:** [Phase 4 Modules](../modules/Phase-4-Search-Recommendations.mdx)
 
-**Goals:**
-- Add search indexing pipeline
-- Implement recommendation endpoints
-- A/B test recommendation algorithms
-
-**Tasks:**
-- [ ] Integrate Elasticsearch or Typesense for product search
-- [ ] Create search indexing worker (sync products to search engine)
-- [ ] Implement recommendation service (co-occurrence, content-based)
-- [ ] Add recommendation endpoints as experiments
-- [ ] Create search analytics and metrics
-
-### Phase 5: Observability Enhancement ⏳ **PENDING**
+### Phase 5: Observability Enhancement ⏳ **NEXT**
 
 **Priority:** Medium | **Dependencies:** None
 
@@ -892,24 +884,32 @@ src/
 │   ├── products/          ✅
 │   ├── mailer/            ✅
 │   ├── experiments/       ✅
-│   ├── orders/            ⏳ Phase 1
-│   ├── payments/          ⏳ Phase 1
-│   ├── inventory/         ⏳ Phase 2
-│   ├── cart/              ⏳ Phase 2
+│   ├── orders/            ✅ Phase 1
+│   ├── payments/          ✅ Phase 1
+│   ├── inventory/         ✅ Phase 2
+│   ├── cart/              ✅ Phase 2
+│   ├── search/            ✅ Phase 4
+│   ├── recommendations/   ✅ Phase 4
 │   ├── shipping/          ⏳ Phase 7
 │   ├── reviews/           ⏳ Phase 7
 │   └── admin/             ⏳ Phase 7
 ├── common/
 │   ├── events/
-│   │   ├── outbox.service.ts
-│   │   └── event-bus.service.ts
+│   │   ├── outbox.service.ts              ✅
+│   │   └── processors/
+│   │       └── outbox-publisher.processor.ts  ✅
+│   ├── workers/
+│   │   ├── processors/
+│   │   │   ├── webhook-retry.processor.ts     ✅
+│   │   │   ├── payment-reconciliation.processor.ts  ✅
+│   │   │   └── search-indexing.processor.ts  ✅
+│   │   ├── services/
+│   │   │   ├── worker-monitoring.service.ts  ✅
+│   │   │   └── dlq-handler.service.ts        ✅
+│   │   └── workers.module.ts                 ✅
 │   ├── middleware/
 │   ├── prometheus/
 │   └── rate-limiting/
-├── workers/
-│   ├── outbox-publisher.processor.ts
-│   ├── webhook-retry.processor.ts
-│   └── payment-reconciliation.processor.ts
 └── lib/
     ├── logger/
     ├── prisma/
@@ -1461,3 +1461,10 @@ This approach will result in a **production-grade e-commerce backend** that is m
 **Last Updated:** 2025-11-12  
 **Maintainer:** Development Team  
 **Status:** Active Development
+
+**Completed Phases:**
+- ✅ Phase 0: Foundation
+- ✅ Phase 1: Orders & Payments
+- ✅ Phase 2: Inventory & Cart
+- ✅ Phase 3: Background Workers
+- ✅ Phase 4: Search & Recommendations
