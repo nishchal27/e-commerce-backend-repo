@@ -243,15 +243,7 @@ export class InventoryService {
         });
 
         this.logger.log(
-          {
-            reservation_id: result.reservationId,
-            sku_id: skuId,
-            quantity,
-            strategy: variant,
-            in_experiment: inExperiment,
-            latency_seconds: latencySeconds,
-          },
-          'Inventory reserved',
+          `Inventory reserved: ${result.reservationId} (strategy: ${variant}, latency: ${latencySeconds}s)`,
           'InventoryService',
         );
 

@@ -140,7 +140,18 @@ export class PaymentsController {
     // If rawBody is not available, use parsed body (less secure but works)
     const payload = (req as any).rawBody || req.body;
 
-    return this.paymentsService.processWebhook(payload, signature || '');
+    try {
+      // Process webhook
+      return await this.paymentsService.processWebhook(payload, signature || '');
+    } catch (error: any) {
+      // Queue webhook for retry (don't throw - return 200 OK to provider)
+      // Provider will not retry if we return 200, but we'll retry internally
+      await this.paymentsService.queueWebhookRetry(payload, signature || '', error);
+
+      // Return success to provider (so they don't retry)
+      // We'll handle retry internally via BullMQ
+      return { processed: false, queued_for_retry: true };
+    }
   }
 
   /**

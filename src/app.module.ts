@@ -19,6 +19,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { CartModule } from './modules/cart/cart.module';
+import { WorkersModule } from './common/workers/workers.module';
 
 // Common modules and utilities
 import { LoggerModule } from './lib/logger/logger.module';
@@ -77,6 +78,7 @@ import { ExperimentsModule } from './modules/experiments/experiments.module';
     PaymentsModule, // Payment processing
     InventoryModule, // Inventory management with reservation strategies
     CartModule, // Shopping cart management
+    WorkersModule, // Background workers (webhook retry, payment reconciliation)
 
     // Experiments module - provides experiments feature
     ExperimentsModule,
