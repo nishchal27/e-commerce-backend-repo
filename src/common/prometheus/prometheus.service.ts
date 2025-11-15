@@ -84,6 +84,30 @@ export class PrometheusService {
   // Gauge: Failed jobs by queue
   public readonly workerFailedJobsGauge: PromClient.Gauge<string>;
 
+  // Search metrics
+  // Counter: Total search queries
+  public readonly searchQueriesCounter: PromClient.Counter<string>;
+  // Histogram: Search query latency
+  public readonly searchQueryLatencyHistogram: PromClient.Histogram<string>;
+  // Counter: Search errors
+  public readonly searchErrorsCounter: PromClient.Counter<string>;
+  // Counter: Search indexing operations
+  public readonly searchIndexingCounter: PromClient.Counter<string>;
+  // Histogram: Search indexing latency
+  public readonly searchIndexingLatencyHistogram: PromClient.Histogram<string>;
+  // Counter: Search indexing errors
+  public readonly searchIndexingErrorsCounter: PromClient.Counter<string>;
+
+  // Recommendation metrics
+  // Counter: Total recommendation queries
+  public readonly recommendationQueriesCounter: PromClient.Counter<string>;
+  // Histogram: Recommendation query latency
+  public readonly recommendationQueryLatencyHistogram: PromClient.Histogram<string>;
+  // Counter: Recommendation clicks
+  public readonly recommendationClicksCounter: PromClient.Counter<string>;
+  // Counter: Recommendation errors
+  public readonly recommendationErrorsCounter: PromClient.Counter<string>;
+
   constructor(private readonly configService: ConfigService) {
     // Create a new registry to hold all metrics
     this.register = new PromClient.Registry();
@@ -296,6 +320,100 @@ export class PrometheusService {
       name: 'worker_failed_jobs',
       help: 'Number of failed jobs in queue',
       labelNames: ['queue'],
+      registers: [this.register],
+    });
+
+    // Initialize search queries counter
+    // Labels: query_length (short, medium, long)
+    this.searchQueriesCounter = new PromClient.Counter({
+      name: 'search_queries_total',
+      help: 'Total number of search queries',
+      labelNames: ['query_length'],
+      registers: [this.register],
+    });
+
+    // Initialize search query latency histogram
+    // Labels: query_length
+    // Buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5] seconds
+    this.searchQueryLatencyHistogram = new PromClient.Histogram({
+      name: 'search_query_latency_seconds',
+      help: 'Latency of search queries in seconds',
+      labelNames: ['query_length'],
+      buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+      registers: [this.register],
+    });
+
+    // Initialize search errors counter
+    // Labels: error_type
+    this.searchErrorsCounter = new PromClient.Counter({
+      name: 'search_errors_total',
+      help: 'Total number of search errors',
+      labelNames: ['error_type'],
+      registers: [this.register],
+    });
+
+    // Initialize search indexing counter
+    // Labels: action (index, delete, reindex)
+    this.searchIndexingCounter = new PromClient.Counter({
+      name: 'search_indexing_operations_total',
+      help: 'Total number of search indexing operations',
+      labelNames: ['action'],
+      registers: [this.register],
+    });
+
+    // Initialize search indexing latency histogram
+    // Labels: action
+    // Buckets: [0.1, 0.5, 1, 2, 5, 10] seconds
+    this.searchIndexingLatencyHistogram = new PromClient.Histogram({
+      name: 'search_indexing_latency_seconds',
+      help: 'Latency of search indexing operations in seconds',
+      labelNames: ['action'],
+      buckets: [0.1, 0.5, 1, 2, 5, 10],
+      registers: [this.register],
+    });
+
+    // Initialize search indexing errors counter
+    // Labels: action, error_type
+    this.searchIndexingErrorsCounter = new PromClient.Counter({
+      name: 'search_indexing_errors_total',
+      help: 'Total number of search indexing errors',
+      labelNames: ['action', 'error_type'],
+      registers: [this.register],
+    });
+
+    // Initialize recommendation queries counter
+    // Labels: strategy
+    this.recommendationQueriesCounter = new PromClient.Counter({
+      name: 'recommendation_queries_total',
+      help: 'Total number of recommendation queries',
+      labelNames: ['strategy'],
+      registers: [this.register],
+    });
+
+    // Initialize recommendation query latency histogram
+    // Labels: strategy
+    // Buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5] seconds
+    this.recommendationQueryLatencyHistogram = new PromClient.Histogram({
+      name: 'recommendation_query_latency_seconds',
+      help: 'Latency of recommendation queries in seconds',
+      labelNames: ['strategy'],
+      buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+      registers: [this.register],
+    });
+
+    // Initialize recommendation clicks counter
+    // Labels: strategy
+    this.recommendationClicksCounter = new PromClient.Counter({
+      name: 'recommendation_clicks_total',
+      help: 'Total number of recommendation clicks',
+      labelNames: ['strategy'],
+      registers: [this.register],
+    });
+
+    // Initialize recommendation errors counter
+    this.recommendationErrorsCounter = new PromClient.Counter({
+      name: 'recommendation_errors_total',
+      help: 'Total number of recommendation errors',
       registers: [this.register],
     });
 
@@ -585,6 +703,93 @@ export class PrometheusService {
   ): void {
     // Note: This is a placeholder - you can add specific metrics if needed
     // For now, we'll just log it
+  }
+
+  /**
+   * Record a search query.
+   * Called by SearchService when a search is performed.
+   *
+   * @param query - Search query string
+   * @param resultCount - Number of results returned
+   * @param latencySeconds - Search latency in seconds
+   */
+  recordSearchQuery(query: string, resultCount: number, latencySeconds: number): void {
+    const queryLength = query.length < 10 ? 'short' : query.length < 30 ? 'medium' : 'long';
+    this.searchQueriesCounter.inc({ query_length: queryLength });
+    this.searchQueryLatencyHistogram.observe({ query_length: queryLength }, latencySeconds);
+  }
+
+  /**
+   * Record a search error.
+   * Called by SearchService when a search fails.
+   *
+   * @param query - Search query string
+   * @param latencySeconds - Search latency in seconds
+   */
+  recordSearchError(query: string, latencySeconds: number): void {
+    const queryLength = query.length < 10 ? 'short' : query.length < 30 ? 'medium' : 'long';
+    this.searchErrorsCounter.inc({ error_type: 'search_failed' });
+    this.searchQueryLatencyHistogram.observe({ query_length: queryLength }, latencySeconds);
+  }
+
+  /**
+   * Record a search indexing operation.
+   * Called by SearchIndexingProcessor when indexing products.
+   *
+   * @param productId - Product ID
+   * @param action - Indexing action (index, delete, reindex)
+   * @param latencySeconds - Indexing latency in seconds
+   */
+  recordSearchIndexing(productId: string, action: string, latencySeconds: number): void {
+    this.searchIndexingCounter.inc({ action });
+    this.searchIndexingLatencyHistogram.observe({ action }, latencySeconds);
+  }
+
+  /**
+   * Record a search indexing error.
+   * Called by SearchIndexingProcessor when indexing fails.
+   *
+   * @param productId - Product ID
+   * @param action - Indexing action
+   * @param latencySeconds - Indexing latency in seconds
+   */
+  recordSearchIndexingError(productId: string, action: string, latencySeconds: number): void {
+    this.searchIndexingErrorsCounter.inc({ action, error_type: 'indexing_failed' });
+    this.searchIndexingLatencyHistogram.observe({ action }, latencySeconds);
+  }
+
+  /**
+   * Record a recommendation query.
+   * Called by RecommendationsService when generating recommendations.
+   *
+   * @param strategy - Recommendation strategy used
+   * @param resultCount - Number of recommendations returned
+   * @param latencySeconds - Query latency in seconds
+   */
+  recordRecommendationQuery(strategy: string, resultCount: number, latencySeconds: number): void {
+    this.recommendationQueriesCounter.inc({ strategy });
+    this.recommendationQueryLatencyHistogram.observe({ strategy }, latencySeconds);
+  }
+
+  /**
+   * Record a recommendation click.
+   * Called by RecommendationsService when a user clicks a recommendation.
+   *
+   * @param strategy - Recommendation strategy that generated the clicked recommendation
+   */
+  recordRecommendationClick(strategy: string): void {
+    this.recommendationClicksCounter.inc({ strategy });
+  }
+
+  /**
+   * Record a recommendation error.
+   * Called by RecommendationsService when recommendation generation fails.
+   *
+   * @param latencySeconds - Query latency in seconds
+   */
+  recordRecommendationError(latencySeconds: number): void {
+    this.recommendationErrorsCounter.inc();
+    // Note: We don't have strategy context on error, so we can't label it
   }
 }
 

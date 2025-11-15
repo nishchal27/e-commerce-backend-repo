@@ -1,0 +1,582 @@
+# Phase 4: Search & Recommendations Implementation Guide
+
+> **Status:** ✅ Complete  
+> **Implementation Date:** 2025-11-12  
+> **Dependencies:** Phase 1 (Orders & Payments), Phase 2 (Inventory & Cart), Phase 3 (Background Workers)
+
+---
+
+## 📋 Table of Contents
+
+1. [Overview](#overview)
+2. [Search Module](#search-module)
+3. [Recommendations Module](#recommendations-module)
+4. [Search Indexing Worker](#search-indexing-worker)
+5. [A/B Testing Integration](#ab-testing-integration)
+6. [Metrics & Observability](#metrics--observability)
+7. [API Reference](#api-reference)
+8. [Configuration](#configuration)
+9. [Usage Examples](#usage-examples)
+10. [Testing](#testing)
+11. [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview
+
+Phase 4 implements product search and recommendation functionality with:
+
+- ✅ **Search Module**: Full-text product search using PostgreSQL
+- ✅ **Recommendations Module**: Multiple recommendation strategies (popularity, co-occurrence, content-based)
+- ✅ **Search Indexing Worker**: Background worker for indexing products
+- ✅ **A/B Testing Integration**: Recommendations can be A/B tested via Experiments module
+- ✅ **Comprehensive Metrics**: Prometheus metrics for search and recommendations
+- ✅ **Event-Driven**: All operations emit events via Outbox pattern
+
+### Key Features
+
+- **Full-Text Search**: PostgreSQL-based search with filtering and pagination
+- **Multiple Recommendation Strategies**: Popularity, co-occurrence, and content-based algorithms
+- **A/B Testing**: Recommendations can be tested via Experiments module
+- **Search Analytics**: Track search queries, results, and clicks
+- **Background Indexing**: Async product indexing via BullMQ workers
+- **Comprehensive Metrics**: Prometheus metrics for monitoring
+
+---
+
+## Search Module
+
+### Architecture
+
+The Search module provides product search functionality using PostgreSQL's ILIKE pattern matching. For production, consider upgrading to PostgreSQL's full-text search (tsvector/tsquery) or an external search engine like Elasticsearch/Meilisearch.
+
+### File Structure
+
+```
+src/modules/search/
+├── search.module.ts              # Module definition
+├── search.service.ts             # Business logic
+├── search.controller.ts          # HTTP endpoints
+├── dto/
+│   └── search-query.dto.ts      # Search query DTO
+└── interfaces/
+    └── search-result.interface.ts # Search result types
+```
+
+### Key Components
+
+#### SearchService
+
+**Responsibilities:**
+- Execute product search queries
+- Apply filters (category, price, stock)
+- Paginate results
+- Track search analytics
+- Emit search events
+
+**Key Methods:**
+- `search()`: Main search method with query, filters, and pagination
+
+#### SearchController
+
+**Endpoints:**
+- `GET /search`: Search products
+
+**Features:**
+- Public access (no authentication required)
+- Supports query parameters: `q`, `page`, `limit`, `filters`
+- Optional user context for personalization
+
+### Search Features
+
+1. **Full-Text Search**: Search by product title and description
+2. **Filtering**: Filter by category, price range, stock availability
+3. **Pagination**: Support for page-based pagination
+4. **Analytics**: Track search queries and results
+5. **Event Emission**: Emit `search.query.v1` events for analytics
+
+---
+
+## Recommendations Module
+
+### Architecture
+
+The Recommendations module provides product recommendations using multiple strategies. Strategies can be selected via experiments or configuration.
+
+### File Structure
+
+```
+src/modules/recommendations/
+├── recommendations.module.ts           # Module definition
+├── recommendations.service.ts          # Business logic
+├── recommendations.controller.ts       # HTTP endpoints
+├── strategies/
+│   ├── popularity.strategy.ts          # Popularity-based recommendations
+│   ├── co-occurrence.strategy.ts       # Collaborative filtering
+│   └── content-based.strategy.ts       # Content similarity
+├── interfaces/
+│   └── recommendation-strategy.interface.ts # Strategy interface
+└── dto/
+    └── get-recommendations.dto.ts      # Recommendation query DTO
+```
+
+### Recommendation Strategies
+
+#### 1. Popularity Strategy
+
+**Algorithm**: Score products based on:
+- Average rating (if reviews exist)
+- Stock availability
+- Sales metrics (in production)
+
+**Use Case**: Good for new users or when no user history is available.
+
+**Implementation**: `PopularityStrategy`
+
+#### 2. Co-Occurrence Strategy
+
+**Algorithm**: Collaborative filtering - "Users who bought X also bought Y"
+
+**Use Case**: Product-based recommendations based on purchase patterns.
+
+**Implementation**: `CoOccurrenceStrategy`
+
+**Note**: Currently a placeholder - requires order items data for full implementation.
+
+#### 3. Content-Based Strategy
+
+**Algorithm**: Recommend products similar to a reference product based on:
+- Category match
+- Title similarity (word overlap)
+- Variant attribute similarity
+
+**Use Case**: "Products similar to X"
+
+**Implementation**: `ContentBasedStrategy`
+
+### Key Components
+
+#### RecommendationsService
+
+**Responsibilities:**
+- Select recommendation strategy (experiment or default)
+- Aggregate recommendations from strategies
+- Track impressions and clicks
+- Emit recommendation events
+
+**Key Methods:**
+- `getRecommendations()`: Get product recommendations
+- `recordClick()`: Record recommendation click (conversion)
+
+#### RecommendationsController
+
+**Endpoints:**
+- `GET /recommendations`: Get product recommendations
+- `POST /recommendations/click`: Record a recommendation click
+
+**Features:**
+- Public access (no authentication required)
+- Supports product-based and user-based recommendations
+- A/B testing integration
+
+---
+
+## Search Indexing Worker
+
+### Overview
+
+The Search Indexing Worker processes background jobs for indexing products in the search engine. It's implemented as a BullMQ processor.
+
+### File Structure
+
+```
+src/common/workers/processors/
+└── search-indexing.processor.ts  # Search indexing worker
+```
+
+### Queue Configuration
+
+**Queue Name**: `search-indexing`
+
+**Configuration:**
+- Concurrency: 5 jobs
+- Rate Limit: 20 jobs/second
+- Retry: 3 attempts with exponential backoff
+- Job Retention: 1 hour (completed), 7 days (failed)
+
+### Job Actions
+
+1. **index**: Index a product in the search engine
+2. **delete**: Delete a product from the search index
+3. **reindex**: Delete and re-index a product
+
+### Events Emitted
+
+- `search.indexed.v1`: When a product is indexed
+- `search.deleted.v1`: When a product is deleted from index
+
+### Usage
+
+```typescript
+// Queue a product indexing job
+await searchIndexingQueue.add('index-product', {
+  productId: 'product-123',
+  action: 'index',
+});
+```
+
+---
+
+## A/B Testing Integration
+
+### Experiment Configuration
+
+Recommendations can be A/B tested via the Experiments module. The experiment key is `recommendation.strategy`.
+
+**Variants:**
+- `popularity`: Popularity-based recommendations
+- `co_occurrence`: Collaborative filtering
+- `content_based`: Content-based similarity
+
+### How It Works
+
+1. **Experiment Assignment**: When a user requests recommendations, `ExperimentsService.assignVariant()` is called
+2. **Strategy Selection**: The assigned variant determines which recommendation strategy to use
+3. **Impression Tracking**: Assignment is automatically tracked via `experiment.impression.v1` event
+4. **Conversion Tracking**: Recommendation clicks are tracked via `experiment.conversion.v1` event
+
+### Example Experiment Setup
+
+```typescript
+// Create experiment
+await experimentsService.create({
+  name: 'recommendation.strategy',
+  description: 'Test different recommendation algorithms',
+  status: 'active',
+  variants: ['popularity', 'co_occurrence', 'content_based'],
+  samplingRate: 1.0, // 100% of users
+});
+```
+
+### Metrics
+
+- **Impressions**: Tracked automatically when recommendations are generated
+- **Clicks**: Tracked when users click on recommendations
+- **Conversion Rate**: Calculated from impressions and clicks
+
+---
+
+## Metrics & Observability
+
+### Prometheus Metrics
+
+#### Search Metrics
+
+- `search_queries_total{query_length}`: Total search queries
+- `search_query_latency_seconds{query_length}`: Search query latency
+- `search_errors_total{error_type}`: Search errors
+- `search_indexing_operations_total{action}`: Search indexing operations
+- `search_indexing_latency_seconds{action}`: Search indexing latency
+- `search_indexing_errors_total{action,error_type}`: Search indexing errors
+
+#### Recommendation Metrics
+
+- `recommendation_queries_total{strategy}`: Total recommendation queries
+- `recommendation_query_latency_seconds{strategy}`: Recommendation query latency
+- `recommendation_clicks_total{strategy}`: Recommendation clicks
+- `recommendation_errors_total`: Recommendation errors
+
+### Example Prometheus Queries
+
+```promql
+# Search query rate
+rate(search_queries_total[5m])
+
+# Average search latency
+rate(search_query_latency_seconds_sum[5m]) / rate(search_query_latency_seconds_count[5m])
+
+# Recommendation click-through rate
+rate(recommendation_clicks_total[5m]) / rate(recommendation_queries_total[5m])
+
+# Search indexing throughput
+rate(search_indexing_operations_total[5m])
+```
+
+### Events
+
+All operations emit events via the Outbox pattern:
+
+- `search.query.v1`: Search query executed
+- `search.indexed.v1`: Product indexed
+- `search.deleted.v1`: Product deleted from index
+- `recommendation.generated.v1`: Recommendations generated
+- `recommendation.clicked.v1`: Recommendation clicked
+
+---
+
+## API Reference
+
+### Search Endpoint
+
+**GET** `/search`
+
+**Query Parameters:**
+- `q` (string, optional): Search query
+- `page` (number, optional, default: 1): Page number
+- `limit` (number, optional, default: 20): Results per page
+- `filters[categoryId]` (string, optional): Filter by category
+- `filters[minPrice]` (number, optional): Minimum price
+- `filters[maxPrice]` (number, optional): Maximum price
+- `filters[inStock]` (boolean, optional): Filter by stock availability
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "id": "product-id",
+      "title": "Product Title",
+      "description": "Product description",
+      "slug": "product-slug",
+      "categoryId": "category-id",
+      "relevanceScore": 0.85,
+      "variants": [...]
+    }
+  ],
+  "total": 100,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 5,
+  "query": "search query",
+  "filters": {...}
+}
+```
+
+### Recommendations Endpoint
+
+**GET** `/recommendations`
+
+**Query Parameters:**
+- `productId` (string, optional): Reference product ID
+- `userId` (string, optional): User ID for personalization
+- `limit` (number, optional, default: 10): Number of recommendations
+
+**Response:**
+```json
+{
+  "recommendations": [
+    {
+      "productId": "product-id",
+      "score": 0.85,
+      "reason": "popular"
+    }
+  ],
+  "strategy": "popularity",
+  "inExperiment": true,
+  "count": 10
+}
+```
+
+### Record Recommendation Click
+
+**POST** `/recommendations/click`
+
+**Body:**
+```json
+{
+  "productId": "product-id",
+  "strategy": "popularity",
+  "inExperiment": true
+}
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Recommendation strategy (default: popularity)
+RECOMMENDATION_STRATEGY=popularity  # Options: popularity, co_occurrence, content_based
+
+# Search indexing queue configuration
+SEARCH_INDEXING_CONCURRENCY=5
+SEARCH_INDEXING_RATE_LIMIT=20
+```
+
+### Default Strategy Selection
+
+The default recommendation strategy is selected via `RECOMMENDATION_STRATEGY` environment variable. If an experiment is active, the experiment variant overrides the default.
+
+---
+
+## Usage Examples
+
+### Search Products
+
+```typescript
+// Search with query
+GET /search?q=laptop&page=1&limit=20
+
+// Search with filters
+GET /search?q=laptop&filters[minPrice]=500&filters[maxPrice]=2000&filters[inStock]=true
+
+// Filter without query
+GET /search?filters[categoryId]=electronics&page=1&limit=20
+```
+
+### Get Recommendations
+
+```typescript
+// Product-based recommendations
+GET /recommendations?productId=product-123&limit=10
+
+// User-based recommendations
+GET /recommendations?userId=user-456&limit=10
+
+// Combined
+GET /recommendations?productId=product-123&userId=user-456&limit=10
+```
+
+### Record Recommendation Click
+
+```typescript
+POST /recommendations/click
+{
+  "productId": "product-123",
+  "strategy": "popularity",
+  "inExperiment": true
+}
+```
+
+### Queue Search Indexing Job
+
+```typescript
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+
+@Injectable()
+export class ProductService {
+  constructor(
+    @InjectQueue('search-indexing') private searchIndexingQueue: Queue,
+  ) {}
+
+  async createProduct(data: CreateProductDto) {
+    const product = await this.prisma.product.create({ data });
+    
+    // Queue indexing job
+    await this.searchIndexingQueue.add('index-product', {
+      productId: product.id,
+      action: 'index',
+    });
+    
+    return product;
+  }
+}
+```
+
+---
+
+## Testing
+
+### Unit Tests
+
+Test recommendation strategies independently:
+
+```typescript
+describe('PopularityStrategy', () => {
+  it('should return popular products', async () => {
+    const recommendations = await strategy.getRecommendations({
+      limit: 10,
+    });
+    expect(recommendations).toHaveLength(10);
+    expect(recommendations[0].score).toBeGreaterThan(0);
+  });
+});
+```
+
+### Integration Tests
+
+Test search and recommendation endpoints:
+
+```typescript
+describe('GET /search', () => {
+  it('should return search results', async () => {
+    const response = await request(app)
+      .get('/search?q=laptop')
+      .expect(200);
+    
+    expect(response.body.results).toBeDefined();
+    expect(response.body.total).toBeGreaterThan(0);
+  });
+});
+```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. Search Returns No Results
+
+**Possible Causes:**
+- No products match the query
+- Filters are too restrictive
+- Database connection issues
+
+**Solutions:**
+- Check database for products
+- Verify filters are correct
+- Check database connection
+
+#### 2. Recommendations Are Empty
+
+**Possible Causes:**
+- No products in database
+- All products are out of stock
+- Strategy implementation issue
+
+**Solutions:**
+- Ensure products exist in database
+- Check stock levels
+- Verify strategy implementation
+
+#### 3. Search Indexing Jobs Fail
+
+**Possible Causes:**
+- Product not found
+- Database connection issues
+- Worker configuration issues
+
+**Solutions:**
+- Check product exists
+- Verify database connection
+- Check worker queue configuration
+
+---
+
+## Best Practices
+
+1. **Search Performance**: For production, consider using PostgreSQL full-text search or an external search engine
+2. **Recommendation Caching**: Cache recommendations for frequently requested products/users
+3. **Experiment Design**: Use proper sampling rates and variant distribution for A/B tests
+4. **Monitoring**: Monitor search and recommendation metrics for performance issues
+5. **Error Handling**: Handle search and recommendation errors gracefully
+
+---
+
+## Future Enhancements
+
+1. **Advanced Search**: Implement PostgreSQL full-text search (tsvector/tsquery)
+2. **External Search Engine**: Integrate Elasticsearch or Meilisearch
+3. **Recommendation Caching**: Cache recommendations for performance
+4. **Personalization**: Enhance recommendations based on user behavior
+5. **Search Analytics**: Build dashboards for search analytics
+
+---
+
+**Last Updated:** 2025-11-12  
+**Status:** ✅ Complete
+
