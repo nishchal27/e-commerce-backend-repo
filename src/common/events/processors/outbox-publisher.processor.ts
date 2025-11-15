@@ -33,6 +33,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OutboxService } from '../outbox.service';
 import { RedisService } from '../../../lib/redis/redis.service';
+import { PrometheusService } from '../../prometheus/prometheus.service';
 import { Logger } from '../../../lib/logger';
 import { DomainEvent } from '../interfaces/domain-event.interface';
 
@@ -71,13 +72,14 @@ export class OutboxPublisherProcessor implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly outboxService: OutboxService,
     private readonly redisService: RedisService,
+    private readonly prometheusService: PrometheusService,
     private readonly configService: ConfigService,
     private readonly logger: Logger,
   ) {
     this.config = {
-      pollingInterval: this.configService.get<number>('OUTBOX_POLLING_INTERVAL', 5000), // 5 seconds
-      batchSize: this.configService.get<number>('OUTBOX_BATCH_SIZE', 100),
-      maxAttempts: this.configService.get<number>('OUTBOX_MAX_ATTEMPTS', 5),
+      pollingInterval: this.configService.get<number>('OUTBOX_POLLING_INTERVAL', 5000) || 5000, // 5 seconds
+      batchSize: Number(this.configService.get<string>('OUTBOX_BATCH_SIZE')) || 100,
+      maxAttempts: Number(this.configService.get<string>('OUTBOX_MAX_ATTEMPTS')) || 5,
     };
   }
 
@@ -179,6 +181,14 @@ export class OutboxPublisherProcessor implements OnModuleInit, OnModuleDestroy {
       // Mark successful events as sent
       if (successfulIds.length > 0) {
         await this.outboxService.markAsSent(successfulIds);
+        
+        // Record metrics for successful publications
+        lockedEvents
+          .filter((e: any) => successfulIds.includes(e.id))
+          .forEach((e: any) => {
+            this.prometheusService.recordOutboxEventPublished(e.topic);
+          });
+        
         this.logger.debug(
           `Successfully published ${successfulIds.length} events`,
           'OutboxPublisherProcessor',
@@ -188,6 +198,14 @@ export class OutboxPublisherProcessor implements OnModuleInit, OnModuleDestroy {
       // Increment attempts for failed events (and unlock for retry)
       if (failedIds.length > 0) {
         await this.outboxService.incrementAttempts(failedIds);
+        
+        // Record metrics for failed publications
+        lockedEvents
+          .filter((e: any) => failedIds.includes(e.id))
+          .forEach((e: any) => {
+            this.prometheusService.recordOutboxEventFailed(e.topic, 'publish_failed');
+          });
+        
         this.logger.warn(
           `Failed to publish ${failedIds.length} events (will retry)`,
           'OutboxPublisherProcessor',

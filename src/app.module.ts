@@ -30,6 +30,8 @@ import { RateLimitModule } from './common/rate-limiting/rate-limit.module';
 import { EventsModule } from './common/events/events.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { PrometheusMiddleware } from './common/prometheus/prometheus.middleware';
+import { ObservabilityModule } from './common/observability/observability.module';
+import { TracingMiddleware } from './common/observability/middleware/tracing.middleware';
 
 // Experiments module
 import { ExperimentsModule } from './modules/experiments/experiments.module';
@@ -76,6 +78,9 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
     // Events module - provides Outbox pattern for reliable event publishing
     EventsModule,
 
+    // Observability module - provides OpenTelemetry tracing and enhanced health checks
+    ObservabilityModule,
+
     // Feature modules
     ProductsModule,
     AuthModule,
@@ -105,8 +110,11 @@ export class AppModule implements NestModule {
    * then PrometheusMiddleware to measure request duration.
    */
   configure(consumer: MiddlewareConsumer) {
-    // Apply Request ID middleware to all routes
+    // Apply Request ID middleware first (adds request ID)
     consumer.apply(RequestIdMiddleware).forRoutes('*');
+
+    // Apply Tracing middleware (extracts trace context, integrates with OpenTelemetry)
+    consumer.apply(TracingMiddleware).forRoutes('*');
 
     // Apply Prometheus middleware to all routes for metrics collection
     consumer.apply(PrometheusMiddleware).forRoutes('*');

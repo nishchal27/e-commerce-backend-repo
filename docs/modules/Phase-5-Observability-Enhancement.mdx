@@ -1,0 +1,422 @@
+# Phase 5: Observability Enhancement
+
+> **Status:** ✅ Complete  
+> **Implementation Date:** 2025-11-12  
+> **Priority:** Medium
+
+---
+
+## 📋 Overview
+
+Phase 5 enhances the observability capabilities of the e-commerce backend by adding:
+
+- **OpenTelemetry Distributed Tracing** - Track requests across services
+- **Enhanced Prometheus Metrics** - Business metrics, database, cache, and outbox metrics
+- **Comprehensive Health Checks** - Detailed component health status
+- **Trace Context Propagation** - Correlate logs, traces, and metrics
+
+---
+
+## 🎯 Goals
+
+1. **Distributed Tracing** - Add OpenTelemetry instrumentation for HTTP and database operations
+2. **Enhanced Metrics** - Add business metrics (database queries, cache performance, outbox backlog)
+3. **Health Monitoring** - Comprehensive health checks for all system components
+4. **Trace Correlation** - Propagate trace IDs across services for debugging
+
+---
+
+## 🏗️ Architecture
+
+### Components
+
+```
+src/common/observability/
+├── tracing/
+│   ├── tracing.service.ts          # OpenTelemetry SDK initialization
+│   └── tracing.module.ts           # Tracing module
+├── health/
+│   ├── health.service.ts           # Health check logic
+│   └── health.controller.ts      # Health check endpoints
+├── middleware/
+│   └── tracing.middleware.ts       # Trace context propagation
+├── services/
+│   └── outbox-metrics.service.ts   # Outbox backlog metrics
+└── observability.module.ts         # Main observability module
+```
+
+### Integration Points
+
+- **HTTP Requests** - Automatic instrumentation via `HttpInstrumentation` and `ExpressInstrumentation`
+- **Database Queries** - Automatic instrumentation via `PgInstrumentation` (Prisma)
+- **Prometheus Metrics** - Enhanced with database, cache, and outbox metrics
+- **Health Checks** - Database, Redis, and queue health monitoring
+
+---
+
+## 📦 Implementation Details
+
+### 1. OpenTelemetry Tracing
+
+#### Tracing Service
+
+**File:** `src/common/observability/tracing/tracing.service.ts`
+
+**Features:**
+- Initializes OpenTelemetry SDK on application startup
+- Configures Jaeger exporter for trace collection
+- Automatic instrumentation for HTTP, Express, and PostgreSQL
+- Configurable sampling rate (100% in dev, 1-5% in prod)
+- Provides methods for creating custom spans
+
+**Configuration:**
+```typescript
+// Environment variables
+OTEL_ENABLED=true                    # Enable/disable tracing
+OTEL_SERVICE_NAME=e-commerce-backend # Service name
+OTEL_EXPORTER_JAEGER_ENDPOINT=http://localhost:14268/api/traces
+OTEL_SAMPLING_RATE=1.0               # 1.0 = 100%, 0.01 = 1%
+```
+
+**Usage:**
+```typescript
+// In a service
+import { TracingService } from '../common/observability/tracing/tracing.service';
+
+constructor(private readonly tracingService: TracingService) {}
+
+async someOperation() {
+  return this.tracingService.createSpan('custom.operation', async (span) => {
+    span.setAttribute('operation.type', 'data-processing');
+    // Your code here
+    return result;
+  });
+}
+```
+
+#### Tracing Middleware
+
+**File:** `src/common/observability/middleware/tracing.middleware.ts`
+
+**Features:**
+- Extracts trace context from incoming headers (`traceparent`)
+- Sets trace ID in request object
+- Adds trace ID to response headers (`X-Trace-ID`)
+- Integrates with OpenTelemetry context propagation
+
+**Trace Context Format:**
+- **W3C Trace Context:** `traceparent: 00-{trace-id}-{parent-id}-{flags}`
+- **Response Header:** `X-Trace-ID: {trace-id}`
+
+### 2. Enhanced Prometheus Metrics
+
+#### New Metrics
+
+**Database Metrics:**
+- `db_query_duration_seconds` - Query duration histogram (by operation, table)
+- `db_queries_total` - Total query count (by operation, table)
+- `db_query_errors_total` - Query errors (by operation, table, error_type)
+
+**Cache Metrics:**
+- `cache_hits_total` - Cache hits (by cache_type)
+- `cache_misses_total` - Cache misses (by cache_type)
+- `cache_hit_ratio` - Cache hit ratio gauge (0.0 to 1.0)
+
+**Outbox Metrics:**
+- `outbox_events_published_total` - Events published (by topic)
+- `outbox_events_failed_total` - Failed publications (by topic, error_type)
+- `outbox_backlog_size` - Number of unsent events (gauge)
+
+**Usage:**
+```typescript
+// Record database query
+this.prometheusService.recordDbQuery('select', 'orders', 0.05);
+
+// Record cache hit/miss
+this.prometheusService.recordCacheHit('redis');
+this.prometheusService.recordCacheMiss('redis');
+
+// Record outbox event
+this.prometheusService.recordOutboxEventPublished('order.created');
+```
+
+### 3. Health Checks
+
+#### Health Service
+
+**File:** `src/common/observability/health/health.service.ts`
+
+**Features:**
+- Checks database connectivity and latency
+- Checks Redis connectivity and latency
+- Checks queue health (active, waiting, failed jobs)
+- Returns detailed component health status
+
+**Health Status:**
+```typescript
+{
+  status: 'healthy' | 'unhealthy' | 'degraded',
+  timestamp: '2025-11-12T10:00:00.000Z',
+  uptime: 3600, // seconds
+  version: '1.0.0',
+  components: [
+    {
+      name: 'database',
+      status: 'healthy',
+      latency: 15, // milliseconds
+      message: 'Connected'
+    },
+    // ... other components
+  ]
+}
+```
+
+#### Health Endpoints
+
+**GET /health** - Simple health check (for load balancers)
+- Returns `200 OK` if healthy
+- Returns `503 Service Unavailable` if unhealthy
+
+**GET /health/detailed** - Detailed health status
+- Returns comprehensive health information for all components
+- Includes latency, status, and error messages
+
+### 4. Outbox Metrics Service
+
+**File:** `src/common/observability/services/outbox-metrics.service.ts`
+
+**Features:**
+- Periodically collects outbox backlog size
+- Updates Prometheus gauge with unsent event count
+- Configurable polling interval (default: 30 seconds)
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+
+```bash
+# OpenTelemetry
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=e-commerce-backend
+OTEL_EXPORTER_JAEGER_ENDPOINT=http://localhost:14268/api/traces
+OTEL_SAMPLING_RATE=1.0  # 1.0 = 100%, 0.01 = 1%
+
+# Outbox Metrics
+OUTBOX_METRICS_INTERVAL=30000  # 30 seconds
+```
+
+### Jaeger Setup
+
+**Docker Compose:**
+```yaml
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"  # UI
+      - "14268:14268"  # HTTP collector
+```
+
+**Access Jaeger UI:** http://localhost:16686
+
+---
+
+## 📊 Metrics Examples
+
+### Database Query Metrics
+
+```promql
+# Average query duration by operation
+avg(db_query_duration_seconds) by (operation)
+
+# Query error rate
+rate(db_query_errors_total[5m]) / rate(db_queries_total[5m])
+
+# Slow queries (> 100ms)
+histogram_quantile(0.95, db_query_duration_seconds{operation="select"}) > 0.1
+```
+
+### Cache Metrics
+
+```promql
+# Cache hit ratio
+cache_hit_ratio{cache_type="redis"}
+
+# Cache hit rate
+rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
+```
+
+### Outbox Metrics
+
+```promql
+# Outbox backlog size
+outbox_backlog_size
+
+# Event publication rate
+rate(outbox_events_published_total[5m]) by (topic)
+
+# Event failure rate
+rate(outbox_events_failed_total[5m]) / rate(outbox_events_published_total[5m])
+```
+
+---
+
+## 🧪 Testing
+
+### Health Check Tests
+
+```bash
+# Simple health check
+curl http://localhost:3000/health
+
+# Detailed health check
+curl http://localhost:3000/health/detailed
+```
+
+### Trace Verification
+
+1. **Start Jaeger:**
+   ```bash
+   docker run -d -p 16686:16686 -p 14268:14268 jaegertracing/all-in-one:latest
+   ```
+
+2. **Make a request:**
+   ```bash
+   curl -H "traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" \
+        http://localhost:3000/api/products
+   ```
+
+3. **View traces in Jaeger UI:** http://localhost:16686
+
+### Metrics Verification
+
+```bash
+# View Prometheus metrics
+curl http://localhost:3000/metrics | grep -E "(db_query|cache_|outbox_)"
+```
+
+---
+
+## 📝 Usage Examples
+
+### Creating Custom Spans
+
+```typescript
+import { TracingService } from '../common/observability/tracing/tracing.service';
+
+@Injectable()
+export class OrdersService {
+  constructor(private readonly tracingService: TracingService) {}
+
+  async createOrder(data: CreateOrderDto) {
+    return this.tracingService.createSpan('order.create', async (span) => {
+      span.setAttribute('order.user_id', data.userId);
+      span.setAttribute('order.amount', data.totalAmount);
+      
+      // Your order creation logic
+      const order = await this.ordersRepository.create(data);
+      
+      span.addEvent('order.created', { order_id: order.id });
+      return order;
+    });
+  }
+}
+```
+
+### Recording Database Metrics
+
+```typescript
+import { PrometheusService } from '../common/prometheus/prometheus.service';
+
+@Injectable()
+export class OrdersRepository {
+  constructor(private readonly prometheusService: PrometheusService) {}
+
+  async findById(id: string) {
+    const startTime = Date.now();
+    try {
+      const order = await this.prisma.order.findUnique({ where: { id } });
+      const duration = (Date.now() - startTime) / 1000;
+      this.prometheusService.recordDbQuery('select', 'orders', duration);
+      return order;
+    } catch (error) {
+      this.prometheusService.recordDbQueryError('select', 'orders', 'query_failed');
+      throw error;
+    }
+  }
+}
+```
+
+### Recording Cache Metrics
+
+```typescript
+async getCachedProduct(id: string) {
+  const cached = await this.redis.get(`product:${id}`);
+  if (cached) {
+    this.prometheusService.recordCacheHit('redis');
+    return JSON.parse(cached);
+  }
+  
+  this.prometheusService.recordCacheMiss('redis');
+  const product = await this.prisma.product.findUnique({ where: { id } });
+  await this.redis.setex(`product:${id}`, 3600, JSON.stringify(product));
+  return product;
+}
+```
+
+---
+
+## 🚀 Deployment
+
+### Production Configuration
+
+```bash
+# Enable tracing with low sampling rate
+OTEL_ENABLED=true
+OTEL_SAMPLING_RATE=0.01  # 1% sampling
+
+# Configure Jaeger endpoint
+OTEL_EXPORTER_JAEGER_ENDPOINT=http://jaeger:14268/api/traces
+```
+
+### Monitoring Setup
+
+1. **Prometheus** - Scrape metrics from `/metrics` endpoint
+2. **Jaeger** - Collect traces from OpenTelemetry exporter
+3. **Grafana** - Create dashboards for metrics and traces
+4. **Alerting** - Set up alerts for:
+   - High database query latency
+   - Low cache hit ratio
+   - Large outbox backlog
+   - Unhealthy components
+
+---
+
+## 📚 Related Documentation
+
+- [Architecture Guide](../architecture/Modules-Architecture%20&%20Experimentation.mdx)
+- [Prometheus Metrics](../architecture/Modules-Architecture%20&%20Experimentation.mdx#observability--monitoring)
+- [Event-Driven Architecture](../architecture/Modules-Architecture%20&%20Experimentation.mdx#event-driven-architecture)
+
+---
+
+## ✅ Checklist
+
+- [x] OpenTelemetry SDK initialization
+- [x] HTTP and Express instrumentation
+- [x] PostgreSQL/Prisma instrumentation
+- [x] Trace context propagation middleware
+- [x] Enhanced Prometheus metrics (database, cache, outbox)
+- [x] Comprehensive health check service
+- [x] Health check endpoints
+- [x] Outbox metrics collection
+- [x] Integration with existing modules
+- [x] Documentation
+
+---
+
+**Last Updated:** 2025-11-12  
+**Maintainer:** Development Team
+

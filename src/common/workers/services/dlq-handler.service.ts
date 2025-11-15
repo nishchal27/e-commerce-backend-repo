@@ -21,7 +21,7 @@
  * - After 7 days, jobs are automatically cleaned up
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue, Job } from 'bullmq';
 import { PrometheusService } from '../../prometheus/prometheus.service';
@@ -75,13 +75,15 @@ export class DLQHandlerService {
   private readonly queues: Map<string, Queue> = new Map();
 
   constructor(
-    @InjectQueue('mail') private readonly mailQueue: Queue,
+    @Optional() @InjectQueue('mail') private readonly mailQueue: Queue | null,
     @InjectQueue('webhook-retry') private readonly webhookRetryQueue: Queue,
     @InjectQueue('payment-reconciliation') private readonly paymentReconciliationQueue: Queue,
     private readonly prometheusService: PrometheusService,
   ) {
-    // Register all queues
-    this.queues.set('mail', this.mailQueue);
+    // Register all queues (mail queue is optional, registered in MailerModule)
+    if (this.mailQueue) {
+      this.queues.set('mail', this.mailQueue);
+    }
     this.queues.set('webhook-retry', this.webhookRetryQueue);
     this.queues.set('payment-reconciliation', this.paymentReconciliationQueue);
   }

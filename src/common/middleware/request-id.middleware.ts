@@ -46,8 +46,21 @@ export class RequestIdMiddleware implements NestMiddleware {
     // Attach request ID to request object for use in controllers/services
     req.requestId = Array.isArray(requestId) ? requestId[0] : requestId;
 
+    // Extract trace ID from headers if present (OpenTelemetry traceparent format)
+    // Format: traceparent: 00-{trace-id}-{parent-id}-{flags}
+    const traceparent = req.headers['traceparent'] as string | undefined;
+    if (traceparent) {
+      const parts = traceparent.split('-');
+      if (parts.length >= 2) {
+        req.traceId = `${parts[1].slice(0, 2)}-${parts[1].slice(2, 18)}-${parts[1].slice(18, 34)}-${parts[1].slice(34, 50)}`;
+      }
+    }
+
     // Add request ID to response headers so clients can use it for correlation
     res.setHeader('X-Request-ID', req.requestId);
+    if (req.traceId) {
+      res.setHeader('X-Trace-ID', req.traceId);
+    }
 
     // Continue to next middleware/handler
     next();
