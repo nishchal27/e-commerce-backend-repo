@@ -27,6 +27,8 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../../lib/prisma/prisma.service';
 import { OutboxService } from '../../common/events/outbox.service';
 import { PrometheusService } from '../../common/prometheus/prometheus.service';
@@ -35,6 +37,7 @@ import { StripeProvider } from './providers/stripe.provider';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
+import { WebhookJobData } from '../../common/workers/interfaces/webhook-job.interface';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '../../lib/logger';
 import { v4 as uuidv4 } from 'uuid';
@@ -54,6 +57,8 @@ export class PaymentsService {
     private readonly configService: ConfigService,
     private readonly stripeProvider: StripeProvider,
     private readonly logger: Logger,
+    // Inject webhook retry queue
+    @InjectQueue('webhook-retry') private readonly webhookRetryQueue: Queue<WebhookJobData>,
   ) {
     // Select payment provider based on configuration
     // For now, only Stripe is implemented
@@ -532,6 +537,65 @@ export class PaymentsService {
     };
 
     return mapping[providerStatus] || 'PENDING';
+  }
+
+  /**
+   * Queue webhook for retry.
+   *
+   * This method queues a failed webhook for retry processing.
+   * Used when webhook processing fails and needs to be retried.
+   *
+   * @param payload - Webhook payload
+   * @param signature - Webhook signature
+   * @param error - Error that occurred during processing
+   */
+  async queueWebhookRetry(payload: any, signature: string, error: any): Promise<void> {
+    try {
+      // Parse webhook event to get event ID and type
+      const webhookEvent = this.paymentProvider.parseWebhookEvent(payload);
+      const provider = this.paymentProvider.name;
+
+      // Find payment if exists (for context)
+      const payment = await this.prisma.payment.findFirst({
+        where: { paymentIntentId: webhookEvent.data?.object?.id || '' },
+      });
+
+      // Create webhook retry job
+      const jobData: WebhookJobData = {
+        paymentId: payment?.id,
+        orderId: payment?.orderId,
+        webhookEventId: webhookEvent.id,
+        eventType: webhookEvent.type,
+        payload,
+        signature,
+        provider,
+        originalAttemptAt: new Date(),
+        attemptNumber: 1,
+        lastError: error.message || 'Unknown error',
+      };
+
+      // Queue job for retry
+      await this.webhookRetryQueue.add('retry-webhook', jobData, {
+        // Job will be retried with exponential backoff
+        // Configuration is in WorkersModule
+      });
+
+      // Record retry attempt metric
+      this.prometheusService.recordWebhookRetryAttempt(provider);
+
+      this.logger.warn(
+        `Webhook queued for retry: ${webhookEvent.id} (${webhookEvent.type})`,
+        'PaymentsService',
+      );
+    } catch (queueError: any) {
+      // If queuing fails, log error but don't throw
+      // We don't want to fail the webhook endpoint
+      this.logger.error(
+        `Failed to queue webhook for retry: ${queueError.message}`,
+        queueError.stack,
+        'PaymentsService',
+      );
+    }
   }
 }
 

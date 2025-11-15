@@ -178,7 +178,7 @@ export class ExperimentsService {
           subject_type: subjectType,
           variant,
         },
-        'experiments-service',
+        {},
       ),
     });
 
@@ -218,7 +218,7 @@ export class ExperimentsService {
           outcome,
           ...metadata,
         },
-        'experiments-service',
+        {},
       ),
     });
 

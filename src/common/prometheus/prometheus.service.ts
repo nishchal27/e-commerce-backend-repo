@@ -64,6 +64,26 @@ export class PrometheusService {
   // Counter: Reservation releases by strategy
   public readonly inventoryReservationReleasesCounter: PromClient.Counter<string>;
 
+  // Webhook retry metrics
+  // Counter: Webhook retry attempts
+  public readonly webhookRetryAttemptsCounter: PromClient.Counter<string>;
+  // Counter: Successful webhook retries
+  public readonly webhookRetrySuccessCounter: PromClient.Counter<string>;
+  // Counter: Failed webhook retries
+  public readonly webhookRetryFailuresCounter: PromClient.Counter<string>;
+  // Histogram: Webhook retry latency
+  public readonly webhookRetryLatencyHistogram: PromClient.Histogram<string>;
+
+  // Worker metrics
+  // Gauge: Active jobs by queue
+  public readonly workerActiveJobsGauge: PromClient.Gauge<string>;
+  // Gauge: Waiting jobs by queue
+  public readonly workerWaitingJobsGauge: PromClient.Gauge<string>;
+  // Gauge: Completed jobs by queue
+  public readonly workerCompletedJobsGauge: PromClient.Gauge<string>;
+  // Gauge: Failed jobs by queue
+  public readonly workerFailedJobsGauge: PromClient.Gauge<string>;
+
   constructor(private readonly configService: ConfigService) {
     // Create a new registry to hold all metrics
     this.register = new PromClient.Registry();
@@ -203,6 +223,79 @@ export class PrometheusService {
       name: 'inventory_reservation_releases_total',
       help: 'Total number of inventory reservation releases',
       labelNames: ['strategy'],
+      registers: [this.register],
+    });
+
+    // Initialize webhook retry attempts counter
+    // Labels: provider
+    this.webhookRetryAttemptsCounter = new PromClient.Counter({
+      name: 'webhook_retry_attempts_total',
+      help: 'Total number of webhook retry attempts',
+      labelNames: ['provider'],
+      registers: [this.register],
+    });
+
+    // Initialize webhook retry success counter
+    // Labels: provider
+    this.webhookRetrySuccessCounter = new PromClient.Counter({
+      name: 'webhook_retry_success_total',
+      help: 'Total number of successful webhook retries',
+      labelNames: ['provider'],
+      registers: [this.register],
+    });
+
+    // Initialize webhook retry failures counter
+    // Labels: provider, error
+    this.webhookRetryFailuresCounter = new PromClient.Counter({
+      name: 'webhook_retry_failures_total',
+      help: 'Total number of failed webhook retries',
+      labelNames: ['provider', 'error'],
+      registers: [this.register],
+    });
+
+    // Initialize webhook retry latency histogram
+    // Labels: provider
+    this.webhookRetryLatencyHistogram = new PromClient.Histogram({
+      name: 'webhook_retry_latency_seconds',
+      help: 'Latency of webhook retry operations in seconds',
+      labelNames: ['provider'],
+      buckets: [0.1, 0.5, 1, 2, 5, 10, 30],
+      registers: [this.register],
+    });
+
+    // Initialize worker active jobs gauge
+    // Labels: queue
+    this.workerActiveJobsGauge = new PromClient.Gauge({
+      name: 'worker_active_jobs',
+      help: 'Number of active jobs in queue',
+      labelNames: ['queue'],
+      registers: [this.register],
+    });
+
+    // Initialize worker waiting jobs gauge
+    // Labels: queue
+    this.workerWaitingJobsGauge = new PromClient.Gauge({
+      name: 'worker_waiting_jobs',
+      help: 'Number of waiting jobs in queue',
+      labelNames: ['queue'],
+      registers: [this.register],
+    });
+
+    // Initialize worker completed jobs gauge
+    // Labels: queue
+    this.workerCompletedJobsGauge = new PromClient.Gauge({
+      name: 'worker_completed_jobs',
+      help: 'Number of completed jobs in queue',
+      labelNames: ['queue'],
+      registers: [this.register],
+    });
+
+    // Initialize worker failed jobs gauge
+    // Labels: queue
+    this.workerFailedJobsGauge = new PromClient.Gauge({
+      name: 'worker_failed_jobs',
+      help: 'Number of failed jobs in queue',
+      labelNames: ['queue'],
       registers: [this.register],
     });
 
@@ -408,6 +501,90 @@ export class PrometheusService {
     this.inventoryReservationReleasesCounter.inc({
       strategy,
     });
+  }
+
+  /**
+   * Record a webhook retry attempt.
+   * Called by WebhookRetryProcessor when a webhook retry is attempted.
+   *
+   * @param provider - Payment provider (stripe, paypal, etc.)
+   */
+  recordWebhookRetryAttempt(provider: string): void {
+    this.webhookRetryAttemptsCounter.inc({
+      provider,
+    });
+  }
+
+  /**
+   * Record a successful webhook retry.
+   * Called by WebhookRetryProcessor when a webhook retry succeeds.
+   *
+   * @param provider - Payment provider
+   * @param latencySeconds - Retry latency in seconds
+   */
+  recordWebhookRetrySuccess(provider: string, latencySeconds: number): void {
+    this.webhookRetrySuccessCounter.inc({
+      provider,
+    });
+
+    this.webhookRetryLatencyHistogram.observe({ provider }, latencySeconds);
+  }
+
+  /**
+   * Record a failed webhook retry.
+   * Called by WebhookRetryProcessor when a webhook retry fails.
+   *
+   * @param provider - Payment provider
+   * @param error - Error message
+   * @param latencySeconds - Retry latency in seconds
+   */
+  recordWebhookRetryFailure(provider: string, error: string, latencySeconds: number): void {
+    this.webhookRetryFailuresCounter.inc({
+      provider,
+      error: error.substring(0, 50), // Truncate long error messages
+    });
+
+    this.webhookRetryLatencyHistogram.observe({ provider }, latencySeconds);
+  }
+
+  /**
+   * Update worker queue metrics.
+   * Called by worker monitoring service to update queue statistics.
+   *
+   * @param queue - Queue name
+   * @param active - Number of active jobs
+   * @param waiting - Number of waiting jobs
+   * @param completed - Number of completed jobs
+   * @param failed - Number of failed jobs
+   */
+  updateWorkerMetrics(
+    queue: string,
+    active: number,
+    waiting: number,
+    completed: number,
+    failed: number,
+  ): void {
+    this.workerActiveJobsGauge.set({ queue }, active);
+    this.workerWaitingJobsGauge.set({ queue }, waiting);
+    this.workerCompletedJobsGauge.set({ queue }, completed);
+    this.workerFailedJobsGauge.set({ queue }, failed);
+  }
+
+  /**
+   * Record payment reconciliation.
+   * Called by PaymentReconciliationProcessor when reconciling payments.
+   *
+   * @param paymentId - Payment ID
+   * @param reconciled - Whether reconciliation found discrepancies
+   * @param latencySeconds - Reconciliation latency in seconds
+   */
+  recordPaymentReconciliation(
+    paymentId: string,
+    reconciled: boolean,
+    latencySeconds: number,
+  ): void {
+    // Note: This is a placeholder - you can add specific metrics if needed
+    // For now, we'll just log it
   }
 }
 

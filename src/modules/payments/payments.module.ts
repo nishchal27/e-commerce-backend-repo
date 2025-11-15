@@ -33,6 +33,7 @@ import { StripeProvider } from './providers/stripe.provider';
 import { PrismaModule } from '../../lib/prisma/prisma.module';
 import { EventsModule } from '../../common/events/events.module';
 import { PrometheusModule } from '../../common/prometheus/prometheus.module';
+import { BullModule } from '@nestjs/bullmq';
 
 /**
  * PaymentsModule provides payment processing functionality
@@ -45,6 +46,10 @@ import { PrometheusModule } from '../../common/prometheus/prometheus.module';
     EventsModule,
     // Prometheus for metrics
     PrometheusModule,
+    // BullMQ for webhook retry queue
+    BullModule.registerQueue({
+      name: 'webhook-retry',
+    }),
   ],
   controllers: [PaymentsController],
   providers: [
