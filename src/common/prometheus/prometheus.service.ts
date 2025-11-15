@@ -50,6 +50,20 @@ export class PrometheusService {
   // Counter: Rate limit blocks
   public readonly rateLimitBlocksCounter: PromClient.Counter<string>;
 
+  // Inventory reservation strategy metrics
+  // Counter: Total reservation attempts by strategy
+  public readonly inventoryReservationAttemptsCounter: PromClient.Counter<string>;
+  // Counter: Successful reservations by strategy
+  public readonly inventoryReservationSuccessCounter: PromClient.Counter<string>;
+  // Counter: Failed reservations by strategy and reason
+  public readonly inventoryReservationFailuresCounter: PromClient.Counter<string>;
+  // Histogram: Reservation latency by strategy
+  public readonly inventoryReservationLatencyHistogram: PromClient.Histogram<string>;
+  // Counter: Reservation commits by strategy
+  public readonly inventoryReservationCommitsCounter: PromClient.Counter<string>;
+  // Counter: Reservation releases by strategy
+  public readonly inventoryReservationReleasesCounter: PromClient.Counter<string>;
+
   constructor(private readonly configService: ConfigService) {
     // Create a new registry to hold all metrics
     this.register = new PromClient.Registry();
@@ -133,6 +147,62 @@ export class PrometheusService {
       name: 'rate_limit_blocks_total',
       help: 'Total number of requests blocked by rate limiting',
       labelNames: ['endpoint', 'type'], // Endpoint path and rate limit type
+      registers: [this.register],
+    });
+
+    // Initialize inventory reservation attempts counter
+    // Labels: strategy (optimistic, pessimistic)
+    this.inventoryReservationAttemptsCounter = new PromClient.Counter({
+      name: 'inventory_reservation_attempts_total',
+      help: 'Total number of inventory reservation attempts',
+      labelNames: ['strategy'], // Reservation strategy (optimistic, pessimistic)
+      registers: [this.register],
+    });
+
+    // Initialize inventory reservation success counter
+    // Labels: strategy
+    this.inventoryReservationSuccessCounter = new PromClient.Counter({
+      name: 'inventory_reservation_success_total',
+      help: 'Total number of successful inventory reservations',
+      labelNames: ['strategy'],
+      registers: [this.register],
+    });
+
+    // Initialize inventory reservation failures counter
+    // Labels: strategy, reason (insufficient_stock, not_found, etc.)
+    this.inventoryReservationFailuresCounter = new PromClient.Counter({
+      name: 'inventory_reservation_failures_total',
+      help: 'Total number of failed inventory reservations',
+      labelNames: ['strategy', 'reason'],
+      registers: [this.register],
+    });
+
+    // Initialize inventory reservation latency histogram
+    // Labels: strategy
+    // Buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5] seconds
+    this.inventoryReservationLatencyHistogram = new PromClient.Histogram({
+      name: 'inventory_reservation_latency_seconds',
+      help: 'Latency of inventory reservation operations in seconds',
+      labelNames: ['strategy'],
+      buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+      registers: [this.register],
+    });
+
+    // Initialize inventory reservation commits counter
+    // Labels: strategy
+    this.inventoryReservationCommitsCounter = new PromClient.Counter({
+      name: 'inventory_reservation_commits_total',
+      help: 'Total number of inventory reservation commits',
+      labelNames: ['strategy'],
+      registers: [this.register],
+    });
+
+    // Initialize inventory reservation releases counter
+    // Labels: strategy
+    this.inventoryReservationReleasesCounter = new PromClient.Counter({
+      name: 'inventory_reservation_releases_total',
+      help: 'Total number of inventory reservation releases',
+      labelNames: ['strategy'],
       registers: [this.register],
     });
 
@@ -256,6 +326,87 @@ export class PrometheusService {
     this.rateLimitBlocksCounter.inc({
       endpoint,
       type,
+    });
+  }
+
+  /**
+   * Record an inventory reservation attempt.
+   * Called by InventoryService when a reservation is attempted.
+   *
+   * @param strategy - Reservation strategy (optimistic, pessimistic)
+   */
+  recordInventoryReservationAttempt(strategy: string): void {
+    this.inventoryReservationAttemptsCounter.inc({
+      strategy,
+    });
+  }
+
+  /**
+   * Record a successful inventory reservation.
+   * Called by InventoryService when a reservation succeeds.
+   *
+   * @param strategy - Reservation strategy
+   * @param latencySeconds - Reservation latency in seconds
+   */
+  recordInventoryReservationSuccess(
+    strategy: string,
+    latencySeconds: number,
+  ): void {
+    this.inventoryReservationSuccessCounter.inc({
+      strategy,
+    });
+
+    this.inventoryReservationLatencyHistogram.observe(
+      { strategy },
+      latencySeconds,
+    );
+  }
+
+  /**
+   * Record a failed inventory reservation.
+   * Called by InventoryService when a reservation fails.
+   *
+   * @param strategy - Reservation strategy
+   * @param reason - Failure reason (insufficient_stock, not_found, etc.)
+   * @param latencySeconds - Reservation latency in seconds
+   */
+  recordInventoryReservationFailure(
+    strategy: string,
+    reason: string,
+    latencySeconds: number,
+  ): void {
+    this.inventoryReservationFailuresCounter.inc({
+      strategy,
+      reason,
+    });
+
+    this.inventoryReservationLatencyHistogram.observe(
+      { strategy },
+      latencySeconds,
+    );
+  }
+
+  /**
+   * Record an inventory reservation commit.
+   * Called by InventoryService when a reservation is committed.
+   *
+   * @param strategy - Reservation strategy
+   */
+  recordInventoryReservationCommit(strategy: string): void {
+    this.inventoryReservationCommitsCounter.inc({
+      strategy,
+    });
+  }
+
+  /**
+   * Record an inventory reservation release.
+   * Called by InventoryService when a reservation is released.
+   *
+   * @param strategy - Reservation strategy
+   */
+  recordInventoryReservationRelease(strategy: string): void {
+    this.inventoryReservationReleasesCounter.inc({
+      strategy,
     });
   }
 }

@@ -1,0 +1,819 @@
+# 🧪 A/B Testing & Experimentation Guide
+
+> **Complete guide to the experiment system, A/B testing framework, and metrics tracking**
+
+**Last Updated:** 2025-11-12  
+**Status:** ✅ Production Ready
+
+---
+
+## 📋 Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [How It Works](#how-it-works)
+4. [Experiment Configuration](#experiment-configuration)
+5. [Integration with Inventory Strategies](#integration-with-inventory-strategies)
+6. [Metrics & Observations](#metrics--observations)
+7. [Code Structure](#code-structure)
+8. [Usage Examples](#usage-examples)
+9. [Prometheus Metrics](#prometheus-metrics)
+10. [Event Tracking](#event-tracking)
+11. [Troubleshooting](#troubleshooting)
+12. [Best Practices](#best-practices)
+
+---
+
+## 🎯 Overview
+
+### What Is This?
+
+This is a **production-grade A/B testing framework** integrated into the e-commerce backend. It allows you to:
+
+- **Test different strategies** (e.g., optimistic vs pessimistic inventory locking)
+- **Assign variants deterministically** (same user always gets same variant)
+- **Track detailed metrics** (latency, success rate, failures)
+- **Record observations** (every operation is tracked)
+- **Analyze results** (via Prometheus metrics and event streams)
+
+### Key Features
+
+✅ **Deterministic Assignment** - Same subject always gets same variant  
+✅ **Sampling Support** - Control experiment participation (0-100%)  
+✅ **Comprehensive Metrics** - Latency, success rate, failures by reason  
+✅ **Event Tracking** - All impressions and conversions recorded  
+✅ **Production Ready** - Integrated with Prometheus, Outbox, and logging  
+
+### Current Implementation
+
+**Active Experiment:**
+- **Key:** `inventory.reservation_strategy`
+- **Variants:** `optimistic`, `pessimistic`
+- **Purpose:** Compare inventory reservation strategies
+- **Status:** Active (100% sampling)
+
+---
+
+## 🏗️ Architecture
+
+### System Components
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Experiments Module                        │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  ExperimentsService                                    │  │
+│  │  - Variant Assignment (Deterministic)                 │  │
+│  │  - Experiment Configuration                           │  │
+│  │  - Conversion Tracking                                 │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          │ assigns variant
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Inventory Module                          │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  InventoryService                                     │  │
+│  │  - Gets strategy from experiment                      │  │
+│  │  - Records metrics (Prometheus)                      │  │
+│  │  - Records conversions (ExperimentsService)          │  │
+│  │  - Emits events (Outbox)                             │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          │ records
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Prometheus + Outbox + Logger                    │
+│  - Metrics: latency, success rate, failures                 │
+│  - Events: impressions, conversions                         │
+│  - Logs: structured JSON with context                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+1. **User makes reservation** → `InventoryService.reserve()`
+2. **Get experiment assignment** → `ExperimentsService.assignVariant()`
+3. **Select strategy** → Based on assigned variant
+4. **Execute operation** → Reserve inventory
+5. **Record metrics** → Prometheus (latency, success/failure)
+6. **Record conversion** → ExperimentsService (outcome)
+7. **Emit events** → Outbox (for analytics)
+
+---
+
+## 🔄 How It Works
+
+### Deterministic Variant Assignment
+
+The system uses **hash-based deterministic assignment**:
+
+```typescript
+// Same subject always gets same variant
+const hash = crypto
+  .createHash('sha256')
+  .update(`${experimentKey}:${subjectId}`)
+  .digest('hex');
+
+// Check sampling (0-100%)
+const samplingHash = parseInt(hash.slice(0, 8), 16) % 100;
+const inExperiment = samplingHash < config.sampling * 100;
+
+// Assign variant
+const variantIndex = parseInt(hash.slice(8, 16), 16) % config.variants.length;
+const variant = config.variants[variantIndex];
+```
+
+**Why Deterministic?**
+- Same user/session always gets same variant
+- Consistent experience
+- Reproducible results
+- No state storage needed
+
+### Experiment Lifecycle
+
+```
+1. Experiment Defined
+   └─> Config stored in ExperimentsService
+   
+2. User Action (e.g., reserve inventory)
+   └─> ExperimentsService.assignVariant()
+       ├─> Check if experiment is active
+       ├─> Check sampling rate
+       ├─> Assign variant (deterministic)
+       └─> Emit experiment.impression event
+   
+3. Operation Executed
+   └─> Use assigned variant (e.g., optimistic strategy)
+       ├─> Record Prometheus metrics
+       └─> Measure latency
+   
+4. Outcome Recorded
+   └─> ExperimentsService.recordConversion()
+       ├─> Emit experiment.conversion event
+       └─> Include metadata (latency, error, etc.)
+```
+
+---
+
+## ⚙️ Experiment Configuration
+
+### Default Configuration
+
+Located in: `src/modules/experiments/experiments.service.ts`
+
+```typescript
+this.experimentConfigs.set('inventory.reservation_strategy', {
+  key: 'inventory.reservation_strategy',
+  name: 'Inventory Reservation Strategy',
+  variants: ['optimistic', 'pessimistic'],
+  sampling: 1.0, // 100% participation
+  status: 'active',
+});
+```
+
+### Configuration Options
+
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| `key` | string | Unique experiment identifier | `"inventory.reservation_strategy"` |
+| `name` | string | Human-readable name | `"Inventory Reservation Strategy"` |
+| `variants` | string[] | Available variants | `["optimistic", "pessimistic"]` |
+| `sampling` | number | Participation rate (0.0-1.0) | `1.0` = 100%, `0.5` = 50% |
+| `status` | string | Experiment status | `"active"`, `"paused"`, `"completed"` |
+
+### Adding a New Experiment
+
+1. **Define experiment config** in `ExperimentsService.initializeDefaultExperiments()`
+2. **Use in service** (e.g., `InventoryService.getStrategy()`)
+3. **Track conversions** when outcomes occur
+
+**Example:**
+```typescript
+// Add to ExperimentsService
+this.experimentConfigs.set('cart.merge_strategy', {
+  key: 'cart.merge_strategy',
+  name: 'Cart Merge Strategy',
+  variants: ['deterministic', 'priority_based'],
+  sampling: 0.5, // 50% participation
+  status: 'active',
+});
+```
+
+---
+
+## 🔗 Integration with Inventory Strategies
+
+### How Inventory Uses Experiments
+
+**File:** `src/modules/inventory/inventory.service.ts`
+
+```typescript
+private getStrategy(
+  userId?: string,
+  sessionId?: string,
+): { strategy: IReservationStrategy; variant: string; inExperiment: boolean } {
+  // Get experiment assignment
+  const assignment = this.experimentsService.assignVariant(
+    'inventory.reservation_strategy',
+    subjectId,
+    subjectType,
+  );
+
+  // If in experiment, use assigned variant
+  if (assignment.inExperiment) {
+    const strategy =
+      assignment.variant === 'pessimistic'
+        ? this.pessimisticStrategy
+        : this.optimisticStrategy;
+
+    return { strategy, variant: assignment.variant, inExperiment: true };
+  }
+
+  // Not in experiment, use default
+  return {
+    strategy: this.defaultStrategy,
+    variant: this.defaultStrategy.name,
+    inExperiment: false,
+  };
+}
+```
+
+### Strategy Selection Flow
+
+```
+User Request
+    │
+    ▼
+InventoryService.reserve()
+    │
+    ▼
+getStrategy(userId, sessionId)
+    │
+    ▼
+ExperimentsService.assignVariant()
+    │
+    ├─> Check experiment config
+    ├─> Check sampling
+    ├─> Assign variant (deterministic)
+    └─> Return: { variant, inExperiment }
+    │
+    ▼
+Select Strategy
+    ├─> variant === 'pessimistic' → PessimisticStrategy
+    └─> variant === 'optimistic' → OptimisticStrategy
+    │
+    ▼
+Execute Reservation
+    ├─> Record attempt metric
+    ├─> Measure latency
+    ├─> Record success/failure
+    └─> Record conversion
+```
+
+---
+
+## 📊 Metrics & Observations
+
+### Prometheus Metrics
+
+All metrics are available at `/metrics` endpoint.
+
+#### 1. Reservation Attempts
+
+```
+inventory_reservation_attempts_total{strategy="optimistic"} 150
+inventory_reservation_attempts_total{strategy="pessimistic"} 145
+```
+
+**Purpose:** Track total reservation attempts by strategy
+
+#### 2. Success Rate
+
+```
+inventory_reservation_success_total{strategy="optimistic"} 142
+inventory_reservation_success_total{strategy="pessimistic"} 144
+```
+
+**Purpose:** Track successful reservations
+
+**Success Rate Calculation:**
+```promql
+rate(inventory_reservation_success_total[5m]) / 
+rate(inventory_reservation_attempts_total[5m])
+```
+
+#### 3. Failures by Reason
+
+```
+inventory_reservation_failures_total{strategy="optimistic",reason="insufficient_stock"} 5
+inventory_reservation_failures_total{strategy="optimistic",reason="not_found"} 2
+inventory_reservation_failures_total{strategy="pessimistic",reason="insufficient_stock"} 1
+```
+
+**Failure Reasons:**
+- `insufficient_stock` - Not enough stock available
+- `not_found` - Product variant not found
+- `timeout` - Operation timed out
+- `lock_contention` - Database lock conflict
+- `unknown` - Other errors
+
+#### 4. Latency Histogram
+
+```
+inventory_reservation_latency_seconds_bucket{strategy="optimistic",le="0.01"} 120
+inventory_reservation_latency_seconds_bucket{strategy="optimistic",le="0.05"} 140
+inventory_reservation_latency_seconds_bucket{strategy="pessimistic",le="0.01"} 100
+inventory_reservation_latency_seconds_bucket{strategy="pessimistic",le="0.05"} 144
+```
+
+**Purpose:** Track latency distribution
+
+**P95 Latency:**
+```promql
+histogram_quantile(0.95, 
+  rate(inventory_reservation_latency_seconds_bucket[5m]) 
+  by (strategy, le)
+)
+```
+
+#### 5. Commits & Releases
+
+```
+inventory_reservation_commits_total{strategy="optimistic"} 130
+inventory_reservation_commits_total{strategy="pessimistic"} 135
+inventory_reservation_releases_total{strategy="optimistic"} 12
+inventory_reservation_releases_total{strategy="pessimistic"} 10
+```
+
+### Observations Tracked
+
+Each reservation operation records:
+
+| Observation | Description | Source |
+|-------------|-------------|--------|
+| **Strategy** | Which strategy was used | Experiment assignment |
+| **Latency** | Operation duration (seconds) | Measured in code |
+| **Success/Failure** | Operation outcome | Strategy result |
+| **Failure Reason** | Why it failed (if failed) | Error analysis |
+| **In Experiment** | Whether subject is in experiment | Experiment assignment |
+| **Subject ID** | User ID or session ID | Request context |
+
+### Example Observation
+
+```json
+{
+  "reservation_id": "abc-123",
+  "sku_id": "sku-456",
+  "quantity": 2,
+  "strategy": "optimistic",
+  "in_experiment": true,
+  "latency_seconds": 0.023,
+  "success": true,
+  "available_stock": 48
+}
+```
+
+---
+
+## 📁 Code Structure
+
+### Key Files
+
+```
+src/
+├── modules/
+│   ├── experiments/
+│   │   ├── experiments.module.ts          # Module definition
+│   │   ├── experiments.service.ts         # Core experiment logic
+│   │   ├── experiments.controller.ts      # HTTP endpoints
+│   │   └── interfaces/
+│   │       └── experiment-assignment.interface.ts  # Type definitions
+│   │
+│   └── inventory/
+│       ├── inventory.service.ts           # Uses experiments
+│       ├── inventory.controller.ts        # HTTP endpoints
+│       └── strategies/
+│           ├── optimistic.strategy.ts     # Optimistic strategy
+│           └── pessimistic.strategy.ts   # Pessimistic strategy
+│
+└── common/
+    └── prometheus/
+        └── prometheus.service.ts          # Metrics recording
+```
+
+### File Responsibilities
+
+#### `experiments.service.ts`
+
+**Purpose:** Core experiment logic
+
+**Key Methods:**
+- `assignVariant()` - Assign variant deterministically
+- `recordConversion()` - Record outcome
+- `getExperimentConfig()` - Get experiment config
+
+**Location:** `src/modules/experiments/experiments.service.ts`
+
+#### `inventory.service.ts`
+
+**Purpose:** Business logic that uses experiments
+
+**Key Methods:**
+- `getStrategy()` - Get strategy via experiment assignment
+- `reserve()` - Reserve inventory (tracks metrics)
+- `commit()` - Commit reservation
+- `release()` - Release reservation
+
+**Location:** `src/modules/inventory/inventory.service.ts`
+
+#### `prometheus.service.ts`
+
+**Purpose:** Metrics recording
+
+**Key Methods:**
+- `recordInventoryReservationAttempt()` - Record attempt
+- `recordInventoryReservationSuccess()` - Record success
+- `recordInventoryReservationFailure()` - Record failure
+- `recordInventoryReservationLatencyHistogram` - Record latency
+
+**Location:** `src/common/prometheus/prometheus.service.ts`
+
+---
+
+## 💡 Usage Examples
+
+### Example 1: Basic Reservation (Automatic A/B Testing)
+
+```typescript
+// User makes reservation
+const result = await inventoryService.reserve(
+  {
+    skuId: 'sku-123',
+    quantity: 2,
+    reservedBy: 'order-456',
+  },
+  userId,        // User ID (for experiment assignment)
+  sessionId,     // Session ID (for anonymous users)
+  requestId,     // Request ID (for tracing)
+  traceId,       // Trace ID (for distributed tracing)
+);
+
+// System automatically:
+// 1. Assigns variant (optimistic or pessimistic)
+// 2. Uses assigned strategy
+// 3. Records metrics
+// 4. Records conversion
+// 5. Emits events
+```
+
+### Example 2: Querying Metrics
+
+**Prometheus Query:**
+```promql
+# Success rate by strategy
+rate(inventory_reservation_success_total[5m]) / 
+rate(inventory_reservation_attempts_total[5m])
+
+# Average latency
+rate(inventory_reservation_latency_seconds_sum[5m]) / 
+rate(inventory_reservation_latency_seconds_count[5m])
+
+# Failure rate by reason
+rate(inventory_reservation_failures_total[5m]) 
+by (strategy, reason)
+```
+
+### Example 3: Adding a New Experiment
+
+```typescript
+// 1. Add to ExperimentsService.initializeDefaultExperiments()
+this.experimentConfigs.set('cart.merge_strategy', {
+  key: 'cart.merge_strategy',
+  name: 'Cart Merge Strategy',
+  variants: ['deterministic', 'priority_based'],
+  sampling: 0.5,
+  status: 'active',
+});
+
+// 2. Use in CartService
+const assignment = this.experimentsService.assignVariant(
+  'cart.merge_strategy',
+  userId,
+  'user',
+);
+
+if (assignment.variant === 'priority_based') {
+  // Use priority-based merge
+} else {
+  // Use deterministic merge
+}
+
+// 3. Record conversion
+await this.experimentsService.recordConversion(
+  'cart.merge_strategy',
+  userId,
+  assignment.variant,
+  'merge_success',
+  { items_merged: 5 },
+);
+```
+
+---
+
+## 📈 Prometheus Metrics
+
+### Available Metrics
+
+| Metric Name | Type | Labels | Description |
+|-------------|------|--------|-------------|
+| `inventory_reservation_attempts_total` | Counter | `strategy` | Total reservation attempts |
+| `inventory_reservation_success_total` | Counter | `strategy` | Successful reservations |
+| `inventory_reservation_failures_total` | Counter | `strategy`, `reason` | Failed reservations |
+| `inventory_reservation_latency_seconds` | Histogram | `strategy` | Reservation latency |
+| `inventory_reservation_commits_total` | Counter | `strategy` | Reservation commits |
+| `inventory_reservation_releases_total` | Counter | `strategy` | Reservation releases |
+
+### Useful Queries
+
+#### Success Rate
+```promql
+rate(inventory_reservation_success_total[5m]) / 
+rate(inventory_reservation_attempts_total[5m])
+```
+
+#### Average Latency
+```promql
+rate(inventory_reservation_latency_seconds_sum[5m]) / 
+rate(inventory_reservation_latency_seconds_count[5m])
+```
+
+#### P95 Latency
+```promql
+histogram_quantile(0.95, 
+  rate(inventory_reservation_latency_seconds_bucket[5m]) 
+  by (strategy, le)
+)
+```
+
+#### Failure Rate by Reason
+```promql
+rate(inventory_reservation_failures_total[5m]) 
+by (strategy, reason)
+```
+
+#### Throughput (Reservations per Second)
+```promql
+rate(inventory_reservation_attempts_total[5m])
+```
+
+---
+
+## 📨 Event Tracking
+
+### Events Emitted
+
+#### 1. Experiment Impression
+
+**Event Type:** `experiment.impression.v1`  
+**Topic:** `experiment.impression`
+
+**Payload:**
+```json
+{
+  "event_id": "uuid",
+  "event_type": "experiment.impression.v1",
+  "timestamp": "2025-11-12T10:00:00.000Z",
+  "source": "experiments-service",
+  "payload": {
+    "experiment_key": "inventory.reservation_strategy",
+    "subject_id": "user-123",
+    "subject_type": "user",
+    "variant": "optimistic"
+  }
+}
+```
+
+**When:** Emitted when variant is assigned
+
+#### 2. Experiment Conversion
+
+**Event Type:** `experiment.conversion.v1`  
+**Topic:** `experiment.conversion`
+
+**Payload:**
+```json
+{
+  "event_id": "uuid",
+  "event_type": "experiment.conversion.v1",
+  "timestamp": "2025-11-12T10:00:01.000Z",
+  "source": "experiments-service",
+  "payload": {
+    "experiment_key": "inventory.reservation_strategy",
+    "subject_id": "user-123",
+    "variant": "optimistic",
+    "outcome": "reservation_success",
+    "reservation_id": "res-456",
+    "sku_id": "sku-789",
+    "quantity": 2,
+    "latency_seconds": 0.023,
+    "available_stock": 48
+  }
+}
+```
+
+**When:** Emitted when outcome occurs (success or failure)
+
+**Outcomes:**
+- `reservation_success` - Reservation succeeded
+- `reservation_failure` - Reservation failed
+
+#### 3. Inventory Reserved (Enhanced)
+
+**Event Type:** `inventory.reserved.v1`  
+**Topic:** `inventory.reserved`
+
+**Payload:**
+```json
+{
+  "event_id": "uuid",
+  "event_type": "inventory.reserved.v1",
+  "timestamp": "2025-11-12T10:00:01.000Z",
+  "source": "inventory-service",
+  "payload": {
+    "reservation_id": "res-456",
+    "sku_id": "sku-789",
+    "quantity": 2,
+    "reserved_by": "order-123",
+    "strategy": "optimistic",
+    "in_experiment": true,
+    "available_stock": 48,
+    "latency_seconds": 0.023
+  }
+}
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### Issue: Variant Assignment Not Working
+
+**Symptoms:**
+- All users get same variant
+- Experiment not active
+
+**Solutions:**
+1. Check experiment status in `ExperimentsService.initializeDefaultExperiments()`
+2. Verify `sampling` is > 0
+3. Check logs for experiment assignment
+
+**Debug:**
+```typescript
+// Add logging in ExperimentsService.assignVariant()
+this.logger.debug({
+  experimentKey,
+  subjectId,
+  variant: assignment.variant,
+  inExperiment: assignment.inExperiment,
+}, 'Experiment assignment');
+```
+
+### Issue: Metrics Not Appearing
+
+**Symptoms:**
+- No metrics in Prometheus
+- Metrics endpoint returns empty
+
+**Solutions:**
+1. Verify PrometheusService is initialized
+2. Check metrics are registered in constructor
+3. Verify InventoryService calls metric methods
+4. Check `/metrics` endpoint
+
+**Debug:**
+```bash
+# Check metrics endpoint
+curl http://localhost:3000/metrics | grep inventory_reservation
+```
+
+### Issue: Conversions Not Recorded
+
+**Symptoms:**
+- No conversion events in Outbox
+- Experiment results incomplete
+
+**Solutions:**
+1. Verify `inExperiment` is true
+2. Check `recordConversion()` is called
+3. Verify OutboxService is working
+4. Check Outbox table for events
+
+**Debug:**
+```typescript
+// Add logging in InventoryService.reserve()
+this.logger.debug({
+  inExperiment,
+  variant,
+  subjectId,
+}, 'Recording conversion');
+```
+
+### Issue: Latency Metrics Incorrect
+
+**Symptoms:**
+- Latency seems wrong
+- Negative values
+
+**Solutions:**
+1. Verify `startTime` is set before operation
+2. Check latency calculation: `(Date.now() - startTime) / 1000`
+3. Ensure latency is recorded in both success and failure paths
+
+---
+
+## ✅ Best Practices
+
+### 1. Experiment Design
+
+- **Start Small:** Begin with low sampling (10-20%)
+- **Monitor Closely:** Watch metrics for anomalies
+- **Gradual Rollout:** Increase sampling over time
+- **Clear Hypothesis:** Know what you're testing
+
+### 2. Variant Naming
+
+- **Descriptive:** Use clear names (`optimistic`, `pessimistic`)
+- **Consistent:** Same naming across codebase
+- **Documented:** Explain what each variant does
+
+### 3. Metrics Collection
+
+- **Track Everything:** Record all relevant metrics
+- **Use Histograms:** For latency distributions
+- **Label Properly:** Include strategy, reason, etc.
+- **Monitor Alerts:** Set up alerts for anomalies
+
+### 4. Event Tracking
+
+- **Include Context:** Add relevant metadata
+- **Consistent Schema:** Use same event structure
+- **Trace Correlation:** Include request_id, trace_id
+- **Error Details:** Include error messages in failures
+
+### 5. Code Organization
+
+- **Separate Concerns:** Experiments vs business logic
+- **Strategy Pattern:** Use for variant implementations
+- **Type Safety:** Use TypeScript interfaces
+- **Documentation:** Comment complex logic
+
+### 6. Testing
+
+- **Unit Tests:** Test variant assignment logic
+- **Integration Tests:** Test full flow
+- **Load Tests:** Test under load
+- **Monitor Results:** Watch for regressions
+
+---
+
+## 📚 Related Documentation
+
+- [Modules Architecture](../../architecture/Modules-Architecture%20&%20Experimentation.mdx) - Overall architecture
+- [Phase 1 Modules](../modules/Phase-1-Orders-Payments-Outbox.mdx) - Orders & Payments
+- [Auth Security Design](../Auth%20Security%20Design.mdx) - Authentication
+
+---
+
+## 🎓 Summary
+
+### What You Learned
+
+1. **Experiment System:** Deterministic variant assignment
+2. **Integration:** How experiments integrate with business logic
+3. **Metrics:** Comprehensive Prometheus metrics
+4. **Events:** Event tracking for analytics
+5. **Code Structure:** Where everything lives
+
+### Key Takeaways
+
+- ✅ Experiments are **deterministic** (same user = same variant)
+- ✅ Metrics are **automatically recorded** (no manual tracking needed)
+- ✅ Events are **reliably published** (via Outbox pattern)
+- ✅ System is **production-ready** (comprehensive error handling)
+
+### Next Steps
+
+1. **Monitor Metrics:** Set up Grafana dashboards
+2. **Analyze Results:** Compare strategy performance
+3. **Add Experiments:** Test other features (cart merge, etc.)
+4. **Optimize:** Use results to improve system
+
+---
+
+**Questions?** Check the code or ask the team!
+
+**Last Updated:** 2025-11-12
+
