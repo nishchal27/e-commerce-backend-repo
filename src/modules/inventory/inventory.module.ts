@@ -28,6 +28,7 @@ import { PessimisticStrategy } from './strategies/pessimistic.strategy';
 import { PrismaModule } from '../../lib/prisma/prisma.module';
 import { EventsModule } from '../../common/events/events.module';
 import { PrometheusModule } from '../../common/prometheus/prometheus.module';
+import { ExperimentsModule } from '../experiments/experiments.module';
 
 /**
  * InventoryModule provides inventory management functionality
@@ -40,6 +41,8 @@ import { PrometheusModule } from '../../common/prometheus/prometheus.module';
     EventsModule,
     // Prometheus for metrics
     PrometheusModule,
+    // Experiments module for A/B testing
+    ExperimentsModule,
   ],
   controllers: [InventoryController],
   providers: [

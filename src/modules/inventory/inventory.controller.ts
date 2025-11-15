@@ -33,7 +33,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { RequestWithId } from '../../common/middleware/request-id.middleware';
-import { Req } from '@nestjs/common';
+import { Req, Headers } from '@nestjs/common';
 
 /**
  * InventoryController handles HTTP requests for inventory endpoints
@@ -62,11 +62,13 @@ export class InventoryController {
   async reserve(
     @Body() reserveDto: ReserveInventoryDto,
     @CurrentUser() user: JwtPayload,
+    @Headers('x-session-id') sessionId: string | undefined,
     @Req() req: RequestWithId,
   ) {
     return this.inventoryService.reserve(
       reserveDto,
       user.sub,
+      sessionId,
       req.requestId,
       req.traceId,
     );
