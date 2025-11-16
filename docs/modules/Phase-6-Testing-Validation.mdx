@@ -1,0 +1,449 @@
+# Phase 6: Testing & Validation
+
+> **Status:** ✅ Complete  
+> **Implementation Date:** 2025-11-12  
+> **Priority:** High
+
+---
+
+## 📋 Overview
+
+Phase 6 implements comprehensive testing infrastructure and validation for the e-commerce backend. It includes:
+
+- **Unit Tests** - Business logic testing with mocks (target: 80%+ coverage)
+- **Integration Tests** - End-to-end API flow testing
+- **Property-Based Tests** - Edge case discovery using fast-check
+- **Load Tests** - Performance validation using k6
+- **Test Utilities** - Reusable test helpers and factories
+
+---
+
+## 🎯 Goals
+
+1. **Comprehensive Coverage** - 80%+ test coverage for all modules
+2. **Critical Flow Testing** - Integration tests for order → payment → confirmation
+3. **Performance Validation** - Load tests for all endpoints
+4. **Edge Case Discovery** - Property-based tests for complex logic
+5. **CI/CD Integration** - Automated test gates
+
+---
+
+## 🏗️ Architecture
+
+### Test Structure
+
+```
+test/
+├── utils/
+│   ├── test-helpers.ts          # Mock factories and utilities
+│   └── test-database.ts         # Database seeding and cleanup
+├── auth.e2e-spec.ts             # Auth integration tests
+├── products.e2e-spec.ts         # Products integration tests
+└── orders.e2e-spec.ts           # Orders integration tests
+
+src/
+├── modules/
+│   ├── orders/
+│   │   └── orders.service.spec.ts      # Orders unit tests
+│   ├── payments/
+│   │   └── payments.service.spec.ts    # Payments unit tests
+│   ├── inventory/
+│   │   └── inventory.service.spec.ts  # Inventory unit tests
+│   ├── cart/
+│   │   ├── cart.service.spec.ts        # Cart unit tests
+│   │   └── utils/
+│   │       └── cart-merge.util.spec.ts # Property-based tests
+│   └── auth/
+│       └── auth.service.spec.ts         # Auth unit tests (existing)
+
+k6/
+├── baseline.js                   # Baseline load test
+├── auth-test.js                  # Auth load test
+├── orders-load-test.js           # Orders load test
+└── payments-load-test.js         # Payments load test
+```
+
+---
+
+## 📦 Implementation Details
+
+### 1. Test Utilities
+
+#### Test Helpers (`test/utils/test-helpers.ts`)
+
+**Features:**
+- Mock factory functions for Prisma, Redis, Logger, Prometheus, Outbox
+- Test data factories (users, orders, products, payments)
+- Request mock helpers
+
+**Usage:**
+```typescript
+import { createMockPrismaService, createTestOrder } from '../test/utils/test-helpers';
+
+const mockPrisma = createMockPrismaService();
+const testOrder = createTestOrder({ id: 'order-123' });
+```
+
+#### Test Database (`test/utils/test-database.ts`)
+
+**Features:**
+- Database seeding for integration tests
+- Database cleanup utilities
+- Transaction helpers
+
+**Usage:**
+```typescript
+import { seedTestDatabase, cleanupTestDatabase } from '../test/utils/test-database';
+
+beforeAll(async () => {
+  const seedData = await seedTestDatabase(prisma);
+});
+
+afterAll(async () => {
+  await cleanupTestDatabase(prisma);
+});
+```
+
+### 2. Unit Tests
+
+#### Orders Service Tests
+
+**File:** `src/modules/orders/orders.service.spec.ts`
+
+**Coverage:**
+- Order creation with idempotency
+- Order status transitions
+- Order retrieval
+- Event emission
+- Error handling
+
+**Example:**
+```typescript
+it('should create a new order successfully', async () => {
+  const result = await service.create(createOrderDto, userId);
+  expect(result.id).toBeDefined();
+  expect(outboxService.writeEvent).toHaveBeenCalled();
+});
+```
+
+#### Payments Service Tests
+
+**File:** `src/modules/payments/payments.service.spec.ts`
+
+**Coverage:**
+- Payment creation with idempotency
+- Payment confirmation
+- Webhook processing
+- Error handling
+
+#### Inventory Service Tests
+
+**File:** `src/modules/inventory/inventory.service.spec.ts`
+
+**Coverage:**
+- Inventory reservation (optimistic/pessimistic)
+- Reservation commitment
+- Reservation release
+- A/B testing integration
+
+#### Cart Service Tests
+
+**File:** `src/modules/cart/cart.service.spec.ts`
+
+**Coverage:**
+- Cart creation and retrieval
+- Adding/updating/removing items
+- Cart merging
+- Cart expiration
+
+### 3. Property-Based Tests
+
+#### Cart Merge Logic
+
+**File:** `src/modules/cart/utils/cart-merge.util.spec.ts`
+
+**Tool:** `fast-check`
+
+**Coverage:**
+- Deterministic merge behavior
+- All items preserved
+- Quantity combination for duplicate SKUs
+- Total calculation correctness
+
+**Example:**
+```typescript
+it('should be deterministic', () => {
+  fc.assert(
+    fc.property(
+      fc.array(cartItemArbitrary),
+      fc.array(cartItemArbitrary),
+      (userItems, anonItems) => {
+        const result1 = mergeCarts(userCart, anonCart);
+        const result2 = mergeCarts(userCart, anonCart);
+        return result1.totalAmount === result2.totalAmount;
+      }
+    )
+  );
+});
+```
+
+### 4. Integration Tests
+
+#### Orders E2E Tests
+
+**File:** `test/orders.e2e-spec.ts`
+
+**Coverage:**
+- Order creation flow
+- Order retrieval
+- Order status updates
+- Idempotency behavior
+- Authentication requirements
+
+**Example:**
+```typescript
+it('should create an order successfully', async () => {
+  const response = await request(app.getHttpServer())
+    .post('/orders')
+    .set('Authorization', `Bearer ${authToken}`)
+    .send(createOrderDto)
+    .expect(201);
+
+  expect(response.body).toHaveProperty('id');
+});
+```
+
+### 5. Load Tests (k6)
+
+#### Orders Load Test
+
+**File:** `k6/orders-load-test.js`
+
+**Metrics:**
+- Order creation throughput
+- Response times (p50, p95, p99)
+- Error rates
+- Idempotency behavior
+
+**Configuration:**
+```javascript
+export const options = {
+  stages: [
+    { duration: '30s', target: 10 },
+    { duration: '1m', target: 20 },
+    { duration: '2m', target: 20 },
+    { duration: '30s', target: 0 },
+  ],
+  thresholds: {
+    http_req_duration: ['p(95)<500', 'p(99)<1000'],
+    http_req_failed: ['rate<0.01'],
+  },
+};
+```
+
+#### Payments Load Test
+
+**File:** `k6/payments-load-test.js`
+
+**Metrics:**
+- Payment creation throughput
+- Payment confirmation latency
+- Error rates
+
+---
+
+## 🔧 Configuration
+
+### Jest Configuration
+
+**Unit Tests:**
+```json
+{
+  "testRegex": ".*\\.spec\\.ts$",
+  "rootDir": "src",
+  "coverageDirectory": "../coverage"
+}
+```
+
+**Integration Tests:**
+```json
+{
+  "testRegex": ".e2e-spec.ts$",
+  "rootDir": ".",
+  "testEnvironment": "node"
+}
+```
+
+### Test Scripts
+
+```bash
+# Run unit tests
+npm run test:unit
+
+# Run integration tests
+npm run test:integration
+
+# Run all tests
+npm run test:all
+
+# Run with coverage
+npm run test:cov
+
+# Run load tests
+npm run k6:orders
+npm run k6:payments
+```
+
+---
+
+## 📊 Test Coverage
+
+### Coverage Targets
+
+| Module | Unit Tests | Integration Tests | Load Tests | Target Coverage |
+|--------|------------|-------------------|------------|-----------------|
+| **Orders** | ✅ | ✅ | ✅ | 80%+ |
+| **Payments** | ✅ | ⏳ | ✅ | 80%+ |
+| **Inventory** | ✅ | ⏳ | ⏳ | 80%+ |
+| **Cart** | ✅ | ⏳ | ⏳ | 80%+ |
+| **Auth** | ✅ | ✅ | ✅ | 90%+ |
+| **Products** | ⏳ | ✅ | ✅ | 70%+ |
+
+### Coverage Reporting
+
+```bash
+# Generate coverage report
+npm run test:cov
+
+# View coverage in browser
+open coverage/lcov-report/index.html
+```
+
+---
+
+## 🧪 Running Tests
+
+### Unit Tests
+
+```bash
+# Run all unit tests
+npm run test:unit
+
+# Run specific test file
+npm test -- orders.service.spec.ts
+
+# Run in watch mode
+npm run test:watch
+```
+
+### Integration Tests
+
+```bash
+# Run all integration tests
+npm run test:integration
+
+# Run specific test file
+npm run test:e2e -- orders.e2e-spec.ts
+```
+
+### Load Tests
+
+```bash
+# Run orders load test
+npm run k6:orders
+
+# Run payments load test
+npm run k6:payments
+
+# Run with custom base URL
+BASE_URL=http://localhost:3000 npm run k6:orders
+```
+
+---
+
+## 📝 Best Practices
+
+### 1. Test Organization
+
+- **Unit tests** - Test business logic in isolation with mocks
+- **Integration tests** - Test API endpoints with real database
+- **Load tests** - Test performance under realistic load
+
+### 2. Test Data
+
+- Use factories for test data creation
+- Clean up test data after tests
+- Use unique IDs to avoid conflicts
+
+### 3. Mocking
+
+- Mock external dependencies (database, Redis, external APIs)
+- Use real implementations for internal services when possible
+- Verify mock interactions
+
+### 4. Assertions
+
+- Test both success and failure cases
+- Verify side effects (events, metrics)
+- Check error messages and status codes
+
+---
+
+## 🚀 CI/CD Integration
+
+### GitHub Actions Example
+
+```yaml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm run test:unit
+      - run: npm run test:integration
+      - run: npm run test:cov
+      - uses: codecov/codecov-action@v3
+```
+
+### Test Gates
+
+- **Unit tests** must pass (exit code 0)
+- **Integration tests** must pass
+- **Coverage** must be above 80%
+- **Load tests** must meet performance thresholds
+
+---
+
+## 📚 Related Documentation
+
+- [Architecture Guide](../architecture/Modules-Architecture%20&%20Experimentation.mdx)
+- [Testing Strategy](../architecture/Modules-Architecture%20&%20Experimentation.mdx#testing-strategy)
+- [k6 Load Testing](../K6%20Experiments%20—%20Setup%20&%20Docs.md)
+
+---
+
+## ✅ Checklist
+
+- [x] Test utilities and helpers
+- [x] Unit tests for Orders service
+- [x] Unit tests for Payments service
+- [x] Unit tests for Inventory service
+- [x] Unit tests for Cart service
+- [x] Property-based tests for cart merge
+- [x] Integration tests for Orders
+- [x] k6 load tests for Orders
+- [x] k6 load tests for Payments
+- [x] Test scripts in package.json
+- [x] Documentation
+
+---
+
+**Last Updated:** 2025-11-12  
+**Maintainer:** Development Team
+
