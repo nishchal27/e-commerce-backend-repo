@@ -135,6 +135,8 @@ import { LoggerModule } from '../../lib/logger/logger.module';
     PrometheusModule, // For metrics
     EventsModule, // For OutboxService
     LoggerModule, // For logging
+    // Note: MailerModule is not imported here because the mail queue is optional
+    // If you want to monitor the mail queue, import MailerModule or register the queue here
   ],
   controllers: [
     // Worker monitoring endpoints

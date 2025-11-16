@@ -195,6 +195,9 @@ export class OutboxService {
    */
   async getUnsentEvents(limit: number = 100) {
     // Note: After running Prisma generate, 'outbox' will be available
+    // Ensure limit is a number (in case it's passed as string from config)
+    const numericLimit = typeof limit === 'number' ? limit : Number(limit) || 100;
+    
     return (this.prisma as any).outbox.findMany({
       where: {
         sentAt: null, // Not yet sent
@@ -203,7 +206,7 @@ export class OutboxService {
       orderBy: {
         createdAt: 'asc', // Process oldest events first (FIFO)
       },
-      take: limit,
+      take: numericLimit,
     });
   }
 

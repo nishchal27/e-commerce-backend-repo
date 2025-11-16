@@ -21,7 +21,7 @@
  * - Monitors all registered queues
  */
 
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -83,7 +83,7 @@ export class WorkerMonitoringService implements OnModuleInit, OnModuleDestroy {
   private readonly queues: Map<string, Queue> = new Map();
 
   constructor(
-    @InjectQueue('mail') private readonly mailQueue: Queue,
+    @Optional() @InjectQueue('mail') private readonly mailQueue: Queue | null,
     @InjectQueue('webhook-retry') private readonly webhookRetryQueue: Queue,
     @InjectQueue('payment-reconciliation') private readonly paymentReconciliationQueue: Queue,
     private readonly prometheusService: PrometheusService,
@@ -92,8 +92,10 @@ export class WorkerMonitoringService implements OnModuleInit, OnModuleDestroy {
   ) {
     this.pollingInterval = this.configService.get<number>('WORKER_MONITORING_INTERVAL', 30000); // 30 seconds
 
-    // Register all queues
-    this.queues.set('mail', this.mailQueue);
+    // Register all queues (mail queue is optional, registered in MailerModule)
+    if (this.mailQueue) {
+      this.queues.set('mail', this.mailQueue);
+    }
     this.queues.set('webhook-retry', this.webhookRetryQueue);
     this.queues.set('payment-reconciliation', this.paymentReconciliationQueue);
   }

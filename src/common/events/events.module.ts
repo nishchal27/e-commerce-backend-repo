@@ -42,6 +42,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../lib/prisma/prisma.module';
 import { RedisModule } from '../../lib/redis/redis.module';
 import { LoggerModule } from '../../lib/logger/logger.module';
+import { PrometheusModule } from '../prometheus/prometheus.module';
 import { OutboxService } from './outbox.service';
 import { OutboxPublisherProcessor } from './processors/outbox-publisher.processor';
 
@@ -56,6 +57,8 @@ import { OutboxPublisherProcessor } from './processors/outbox-publisher.processo
     RedisModule,
     // Logger for structured logging
     LoggerModule,
+    // Prometheus for metrics
+    PrometheusModule,
   ],
   providers: [
     // OutboxService: Write events to Outbox table
