@@ -11,6 +11,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { Logger } from './lib/logger';
+import { SecurityService } from './common/security/security.service';
 
 /**
  * Bootstrap function that initializes and starts the NestJS application.
@@ -29,6 +30,23 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT', 3000);
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+
+  // Validate required secrets on startup
+  const securityService = app.get(SecurityService);
+  try {
+    securityService.validateSecrets();
+  } catch (error: any) {
+    const logger = app.get(Logger);
+    logger.error(
+      `Security validation failed: ${error.message}`,
+      error.stack,
+      'Bootstrap',
+    );
+    // In production, exit if secrets are missing
+    if (nodeEnv === 'production') {
+      process.exit(1);
+    }
+  }
 
   // Enable global validation pipe - automatically validates DTOs using class-validator
   app.useGlobalPipes(

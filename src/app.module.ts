@@ -32,9 +32,20 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { PrometheusMiddleware } from './common/prometheus/prometheus.middleware';
 import { ObservabilityModule } from './common/observability/observability.module';
 import { TracingMiddleware } from './common/observability/middleware/tracing.middleware';
+import { AuditLogModule } from './common/audit/audit-log.module';
+import { SecurityModule } from './common/security/security.module';
 
 // Experiments module
 import { ExperimentsModule } from './modules/experiments/experiments.module';
+
+// Reviews module
+import { ReviewsModule } from './modules/reviews/reviews.module';
+
+// Admin module
+import { AdminModule } from './modules/admin/admin.module';
+
+// Shipping module
+import { ShippingModule } from './modules/shipping/shipping.module';
 
 // Search module
 import { SearchModule } from './modules/search/search.module';
@@ -81,6 +92,21 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
     // Observability module - provides OpenTelemetry tracing and enhanced health checks
     ObservabilityModule,
 
+    // Audit logging module - provides audit trail for compliance
+    AuditLogModule,
+
+    // Security module - security utilities and hardening
+    SecurityModule,
+
+    // Reviews module - product reviews and ratings
+    ReviewsModule,
+
+    // Admin module - administrative functionality with RBAC
+    AdminModule,
+
+    // Shipping module - shipping provider abstraction
+    ShippingModule,
+
     // Feature modules
     ProductsModule,
     AuthModule,
@@ -96,9 +122,7 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
     // Experiments module - provides experiments feature
     ExperimentsModule,
 
-    // TODO: Add more modules as they are implemented:
-    // - ReviewsModule
-    // - AnalyticsModule
+    // All modules implemented
   ],
   controllers: [AppController],
   providers: [AppService],
