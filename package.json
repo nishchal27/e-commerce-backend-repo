@@ -43,6 +43,7 @@
     "@nestjs/mapped-types": "^2.0.4",
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/swagger": "^7.4.2",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-jaeger": "^2.2.0",
     "@opentelemetry/exporter-prometheus": "^0.208.0",
@@ -73,6 +74,7 @@
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
     "stripe": "^19.3.1",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

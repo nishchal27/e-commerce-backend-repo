@@ -9,6 +9,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { Logger } from './lib/logger';
 import { SecurityService } from './common/security/security.service';
@@ -66,6 +67,49 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Setup Swagger/OpenAPI documentation
+  if (nodeEnv !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('E-Commerce Backend API')
+      .setDescription(
+        'Production-grade e-commerce backend API with authentication, orders, payments, inventory, cart, search, recommendations, reviews, and admin functionality.',
+      )
+      .setVersion('1.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          name: 'JWT',
+          description: 'Enter JWT token',
+          in: 'header',
+        },
+        'JWT-auth', // This name here is important for matching up with @ApiBearerAuth() in your controller!
+      )
+      .addTag('Auth', 'Authentication and authorization endpoints')
+      .addTag('Products', 'Product catalog management')
+      .addTag('Orders', 'Order management')
+      .addTag('Payments', 'Payment processing')
+      .addTag('Inventory', 'Inventory management')
+      .addTag('Cart', 'Shopping cart management')
+      .addTag('Search', 'Product search')
+      .addTag('Recommendations', 'Product recommendations')
+      .addTag('Reviews', 'Product reviews and ratings')
+      .addTag('Admin', 'Administrative operations (ADMIN/MANAGER only)')
+      .addTag('Shipping', 'Shipping operations')
+      .addTag('Health', 'Health check endpoints')
+      .addTag('Metrics', 'Prometheus metrics')
+      .addTag('Workers', 'Background worker management')
+      .build();
+
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+      },
+    });
+  }
+
   // Start the HTTP server
   await app.listen(port);
 
@@ -74,6 +118,9 @@ async function bootstrap() {
   logger.log(`Application is running on: http://localhost:${port}`, 'Bootstrap');
   logger.log(`Environment: ${nodeEnv}`, 'Bootstrap');
   logger.log(`Metrics endpoint: http://localhost:${port}/metrics`, 'Bootstrap');
+  if (nodeEnv !== 'production') {
+    logger.log(`Swagger documentation: http://localhost:${port}/api`, 'Bootstrap');
+  }
 }
 
 // Execute bootstrap and handle any errors

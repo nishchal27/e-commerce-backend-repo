@@ -36,6 +36,7 @@ import {
   Query,
   BadRequestException,
 } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
@@ -53,6 +54,7 @@ import { RateLimitGuard } from '../../common/rate-limiting/rate-limit.guard';
 /**
  * AuthController handles HTTP requests for authentication endpoints
  */
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   // Refresh token cookie configuration
@@ -104,6 +106,11 @@ export class AuthController {
   @UseGuards(RateLimitGuard)
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Register a new user' })
+  @ApiBody({ type: RegisterDto })
+  @ApiResponse({ status: 201, description: 'User registered successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input or email already exists' })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async register(
     @Body() registerDto: RegisterDto,
     @Res({ passthrough: true }) response: Response,
