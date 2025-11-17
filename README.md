@@ -297,6 +297,12 @@ See `E-commerce Backend — Project Plan & Docs.mdx` for the full roadmap.
 
 - **Project Plan**: `E-commerce Backend — Project Plan & Docs.mdx` - Comprehensive project documentation
 - **Quick Start**: `docs/quickstart.md` - Getting started guide and first benchmark
+- **API Documentation**: `http://localhost:3000/api` - Swagger/OpenAPI documentation (development)
+- **Deployment Guide**: `docs/DEPLOYMENT.md` - Production deployment instructions
+- **Developer Onboarding**: `docs/DEVELOPER-ONBOARDING.md` - Getting started guide for developers
+- **API Usage Examples**: `docs/API-USAGE-EXAMPLES.md` - Complete API usage examples
+- **Troubleshooting**: `docs/TROUBLESHOOTING.md` - Common issues and solutions
+- **Postman Collection**: `docs/postman/e-commerce-backend.postman_collection.json` - Import into Postman
 
 ## 🤝 Contributing
 
