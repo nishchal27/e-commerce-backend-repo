@@ -49,6 +49,9 @@ lerna-debug.log*
 # Docker
 .dockerignore
 
+# Loki data directory
+loki-data/
+
 # Temporary files
 *.tmp
 *.temp

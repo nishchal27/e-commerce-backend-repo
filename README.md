@@ -303,6 +303,8 @@ See `E-commerce Backend — Project Plan & Docs.mdx` for the full roadmap.
 - **API Usage Examples**: `docs/API-USAGE-EXAMPLES.md` - Complete API usage examples
 - **Troubleshooting**: `docs/TROUBLESHOOTING.md` - Common issues and solutions
 - **Postman Collection**: `docs/postman/e-commerce-backend.postman_collection.json` - Import into Postman
+- **Grafana Quick Start**: `docs/GRAFANA-QUICK-START.md` - **NEW** - Fix "No data" issues in Grafana
+- **Grafana Troubleshooting**: `docs/GRAFANA-TROUBLESHOOTING.md` - **NEW** - Detailed Grafana troubleshooting
 
 ## 🤝 Contributing
 

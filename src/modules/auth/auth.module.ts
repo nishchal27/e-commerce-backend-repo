@@ -33,6 +33,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { MailerModule } from '../mailer/mailer.module';
+import { normalizeJwtExpiresIn } from './utils/token.util';
 
 /**
  * AuthModule provides authentication and authorization services
@@ -48,7 +49,11 @@ import { MailerModule } from '../mailer/mailer.module';
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
         const secret = configService.get<string>('JWT_SECRET');
-        const expiresIn = configService.get<string>('JWT_EXPIRES_IN', '3600');
+        const expiresInRaw = configService.get<string>('JWT_EXPIRES_IN', '3600');
+        
+        // Normalize expiration time to ensure proper format
+        // This prevents issues where numeric strings are misinterpreted
+        const expiresIn = normalizeJwtExpiresIn(expiresInRaw);
 
         if (!secret) {
           throw new Error('JWT_SECRET is required in environment variables');
@@ -57,7 +62,7 @@ import { MailerModule } from '../mailer/mailer.module';
         return {
           secret, // Secret key for signing tokens
           signOptions: {
-            expiresIn, // Token expiration time (default: 1 hour)
+            expiresIn, // Token expiration time (normalized, default: 1 hour = "3600s")
           },
         };
       },
