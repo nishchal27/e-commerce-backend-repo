@@ -127,3 +127,43 @@ export function createJwtPayload(
   };
 }
 
+/**
+ * Normalize JWT expiration time to ensure proper format for jsonwebtoken library
+ * 
+ * The jsonwebtoken library expects expiresIn as:
+ * - String with unit: "1h", "15m", "3600s", "1d"
+ * - Number: seconds (not string)
+ * 
+ * This method ensures numeric strings are properly formatted with "s" suffix
+ * to avoid any misinterpretation issues (e.g., "3600" -> "3600s").
+ * 
+ * Common issue: If JWT_EXPIRES_IN is set to "3" (intending 3 hours or 3 minutes),
+ * it will be interpreted as 3 seconds, causing tokens to expire immediately.
+ * This normalization helps prevent such issues.
+ * 
+ * @param expiresIn - Raw value from environment variable (e.g., "3600", "1h", "15m")
+ * @returns Normalized expiration string (e.g., "3600s" or "1h")
+ */
+export function normalizeJwtExpiresIn(expiresIn: string): string {
+  // Trim whitespace
+  const trimmed = expiresIn.trim();
+  
+  // If already has a unit suffix (h, m, s, d), return as-is
+  if (/^\d+[smhd]$/i.test(trimmed)) {
+    return trimmed;
+  }
+  
+  // If it's a plain number (string), parse it
+  const numericValue = parseInt(trimmed, 10);
+  
+  // Validate it's a valid number
+  if (isNaN(numericValue) || numericValue <= 0) {
+    // Return default: 1 hour (3600 seconds)
+    return '3600s';
+  }
+  
+  // Convert numeric string to format with "s" suffix (e.g., "3600" -> "3600s")
+  // This ensures jsonwebtoken interprets it correctly as seconds
+  return `${numericValue}s`;
+}
+

@@ -125,34 +125,72 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+    depends_on:
+      app:
+        condition: service_healthy
     networks:
       - ecommerce-network
 
-  # Grafana Dashboard (Optional)
-  # Uncomment to enable Grafana for visualizing Prometheus metrics
-  # grafana:
-  #   image: grafana/grafana:latest
-  #   container_name: ecommerce-grafana
-  #   restart: unless-stopped
-  #   ports:
-  #     - '3001:3000'
-  #   environment:
-  #     GF_SECURITY_ADMIN_USER: admin
-  #     GF_SECURITY_ADMIN_PASSWORD: admin
-  #     GF_SERVER_ROOT_URL: http://localhost:3001
-  #   volumes:
-  #     - grafana_data:/var/lib/grafana
-  #   depends_on:
-  #     - prometheus
-  #   networks:
-  #     - ecommerce-network
+  # Loki - Log Aggregation System
+  loki:
+    image: grafana/loki:latest
+    container_name: ecommerce-loki
+    restart: unless-stopped
+    user: "0:0"
+    ports:
+      - '3100:3100'
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml
+      - ./loki-data:/loki
+    networks:
+      - ecommerce-network
+
+  # Promtail - Log Collector
+  promtail:
+    image: grafana/promtail:latest
+    container_name: ecommerce-promtail
+    restart: unless-stopped
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - ecommerce-network
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ecommerce-grafana
+    restart: unless-stopped
+    ports:
+      - '3001:3000'
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SERVER_ROOT_URL: http://localhost:3001
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    networks:
+      - ecommerce-network
 
 # Named volumes for data persistence
 volumes:
   postgres_data:
   redis_data:
   prometheus_data:
-  # grafana_data:
+  grafana_data:
 
 # Network for service communication
 networks:

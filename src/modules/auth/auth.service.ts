@@ -50,6 +50,7 @@ import {
   hashRefreshToken,
   verifyRefreshToken,
   createJwtPayload,
+  normalizeJwtExpiresIn,
 } from './utils/token.util';
 
 /**
@@ -92,14 +93,36 @@ export class AuthService {
     }
 
     this.jwtSecret = jwtSecret;
-    this.jwtExpiresIn = this.configService.get<string>('JWT_EXPIRES_IN', '3600');
+    
+    // Parse and normalize JWT_EXPIRES_IN
+    // jsonwebtoken expects: string with unit ("1h", "15m", "3600s") or number (seconds)
+    // We'll normalize numeric strings to ensure proper interpretation
+    const jwtExpiresInRaw = this.configService.get<string>('JWT_EXPIRES_IN', '3600');
+    this.jwtExpiresIn = normalizeJwtExpiresIn(jwtExpiresInRaw);
+    
     this.refreshExpiresIn = this.configService.get<number>(
       'JWT_REFRESH_EXPIRES_IN',
       604800,
     ); // 7 days default
     this.hmacSecret = hmacSecret;
     this.appUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
+    
+    // Log JWT expiration for debugging
+    this.logger.log(
+      `JWT token expiration configured: ${this.jwtExpiresIn} (from JWT_EXPIRES_IN=${jwtExpiresInRaw})`,
+      'AuthService',
+    );
+    
+    // Warn if expiration is too short (less than 1 minute)
+    const numericValue = parseInt(jwtExpiresInRaw, 10);
+    if (!isNaN(numericValue) && numericValue < 60) {
+      this.logger.warn(
+        `JWT_EXPIRES_IN is very short (${numericValue}s). This may cause authentication issues. Consider using a value >= 60 seconds.`,
+        'AuthService',
+      );
+    }
   }
+
 
   /**
    * Register a new user

@@ -42,17 +42,22 @@ WORKDIR /app
 # Install OpenSSL for Prisma (required for database connections)
 RUN apk add --no-cache openssl libc6-compat
 
-# Install production dependencies only
-# Note: We need prisma CLI for generation, so install it temporarily
+# Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
-RUN npm ci --omit=dev && \
-    npm install prisma --no-save && \
+
+# Copy built application from build stage FIRST
+COPY --from=build /app/dist ./dist
+
+# Copy ALL node_modules from build stage (includes all dependencies)
+# This ensures @nestjs/swagger and all other runtime dependencies are available
+# We do this BEFORE installing production deps to avoid conflicts
+COPY --from=build /app/node_modules ./node_modules
+
+# Install Prisma Client in production (needs to match the binary target)
+RUN npm install prisma --no-save && \
     npx prisma generate && \
     npm uninstall prisma
-
-# Copy built application from build stage
-COPY --from=build /app/dist ./dist
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
