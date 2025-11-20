@@ -5,8 +5,9 @@
  * This DTO is used for creating new products via POST /products endpoint.
  */
 
-import { IsString, IsNotEmpty, IsOptional, IsArray, ValidateNested, IsUUID } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, ValidateNested, IsUUID, IsEnum, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
+import { Gender, ProductStatus } from '@prisma/client';
 
 /**
  * DTO for creating a product variant (SKU)
@@ -19,6 +20,9 @@ export class CreateProductVariantDto {
   @IsNotEmpty()
   price: number;
 
+  @IsOptional()
+  compareAtPrice?: number; // Original price for showing discounts
+
   @IsString()
   @IsOptional()
   currency?: string = 'USD';
@@ -27,7 +31,11 @@ export class CreateProductVariantDto {
   attributes?: Record<string, any>; // JSONB field for flexible attributes (size, color, etc.)
 
   @IsOptional()
-  stock?: number = 0;
+  stock?: number = 0; // Legacy: total stock (deprecated in favor of InventoryStock)
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean = true;
 }
 
 /**
@@ -49,6 +57,34 @@ export class CreateProductDto {
   @IsUUID()
   @IsOptional()
   categoryId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  brandId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  collectionId?: string;
+
+  @IsEnum(Gender)
+  @IsOptional()
+  gender?: Gender;
+
+  @IsEnum(ProductStatus)
+  @IsOptional()
+  status?: ProductStatus = ProductStatus.DRAFT;
+
+  @IsString()
+  @IsOptional()
+  metaTitle?: string; // SEO meta title
+
+  @IsString()
+  @IsOptional()
+  metaDescription?: string; // SEO meta description
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean = true;
 
   @IsArray()
   @ValidateNested({ each: true })

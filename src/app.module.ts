@@ -53,6 +53,32 @@ import { SearchModule } from './modules/search/search.module';
 // Recommendations module
 import { RecommendationsModule } from './modules/recommendations/recommendations.module';
 
+// Taxonomy modules
+import { CategoriesModule } from './modules/categories/categories.module';
+import { BrandsModule } from './modules/brands/brands.module';
+import { CollectionsModule } from './modules/collections/collections.module';
+
+// Warehouse module
+import { WarehousesModule } from './modules/warehouses/warehouses.module';
+
+// Promotion module
+import { PromotionsModule } from './modules/promotions/promotions.module';
+
+// Returns module
+import { ReturnsModule } from './modules/returns/returns.module';
+
+// Media module
+import { MediaModule } from './modules/media/media.module';
+
+// SizeChart module
+import { SizeChartsModule } from './modules/size-charts/size-charts.module';
+
+// PriceHistory module
+import { PriceHistoryModule } from './modules/price-history/price-history.module';
+
+// Supplier module
+import { SuppliersModule } from './modules/suppliers/suppliers.module';
+
 /**
  * AppModule - Root module of the application
  *
@@ -118,6 +144,18 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
     WorkersModule, // Background workers (webhook retry, payment reconciliation)
     SearchModule, // Product search functionality
     RecommendationsModule, // Product recommendations with A/B testing
+
+    // Taxonomy modules - product organization
+    CategoriesModule, // Hierarchical categories
+    BrandsModule, // Clothing brands/manufacturers
+    CollectionsModule, // Seasonal collections and campaigns
+    WarehousesModule, // Warehouse locations for multi-warehouse inventory
+    PromotionsModule, // Promo codes and discounts
+    ReturnsModule, // Returns and RMA management
+    MediaModule, // Product and variant images
+    SizeChartsModule, // Size measurements mapping
+    PriceHistoryModule, // Price audit trail
+    SuppliersModule, // Supplier and cost data
 
     // Experiments module - provides experiments feature
     ExperimentsModule,

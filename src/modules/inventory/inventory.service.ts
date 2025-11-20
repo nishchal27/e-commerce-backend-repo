@@ -23,6 +23,7 @@ import { PrismaService } from '../../lib/prisma/prisma.service';
 import { OutboxService } from '../../common/events/outbox.service';
 import { PrometheusService } from '../../common/prometheus/prometheus.service';
 import { ExperimentsService } from '../experiments/experiments.service';
+import { InventoryStockService } from './inventory-stock.service';
 import { IReservationStrategy } from './interfaces/reservation-strategy.interface';
 import { OptimisticStrategy } from './strategies/optimistic.strategy';
 import { PessimisticStrategy } from './strategies/pessimistic.strategy';
@@ -44,6 +45,7 @@ export class InventoryService {
     private readonly outboxService: OutboxService,
     private readonly prometheusService: PrometheusService,
     private readonly experimentsService: ExperimentsService,
+    private readonly inventoryStockService: InventoryStockService,
     private readonly optimisticStrategy: OptimisticStrategy,
     private readonly pessimisticStrategy: PessimisticStrategy,
     private readonly configService: ConfigService,
@@ -147,12 +149,23 @@ export class InventoryService {
     requestId?: string,
     traceId?: string,
   ) {
-    const { skuId, quantity, reservedBy, ttlSeconds } = reserveDto;
+    const { skuId, warehouseId, quantity, reservedBy, ttlSeconds } = reserveDto;
     const startTime = Date.now();
 
     // Get strategy via experiment assignment
     const { strategy, variant, inExperiment } = this.getStrategy(userId, sessionId);
     const subjectId = userId || sessionId || reservedBy;
+
+    // If warehouse not specified, find available warehouse
+    let selectedWarehouseId = warehouseId;
+    if (!selectedWarehouseId) {
+      selectedWarehouseId = await this.inventoryStockService.findAvailableWarehouse(skuId, quantity);
+      if (!selectedWarehouseId) {
+        throw new BadRequestException(
+          `No warehouse has sufficient stock for variant ${skuId} (quantity: ${quantity})`,
+        );
+      }
+    }
 
     // Record attempt metric
     this.prometheusService.recordInventoryReservationAttempt(variant);
@@ -161,6 +174,7 @@ export class InventoryService {
       // Reserve inventory
       const result = await strategy.reserve({
           skuId,
+          warehouseId: selectedWarehouseId,
           quantity,
           reservedBy,
           ttlSeconds,
@@ -435,17 +449,19 @@ export class InventoryService {
 
   /**
    * Get stock for a product variant.
+   * Returns multi-warehouse stock information.
    *
    * @param skuId - Product variant SKU ID
+   * @param warehouseId - Optional warehouse ID to get stock for specific warehouse
    * @returns Stock information
    */
-  async getStock(skuId: string) {
+  async getStock(skuId: string, warehouseId?: string) {
     const variant = await this.prisma.productVariant.findUnique({
       where: { id: skuId },
       select: {
         id: true,
         sku: true,
-        stock: true,
+        stock: true, // Legacy field (deprecated)
       },
     });
 
@@ -453,7 +469,27 @@ export class InventoryService {
       throw new NotFoundException(`Product variant with SKU ID ${skuId} not found`);
     }
 
-    // Get active reservations for this SKU
+    // Get stock from InventoryStock (multi-warehouse)
+    if (warehouseId) {
+      const stock = await this.inventoryStockService.getStockByWarehouse(skuId, warehouseId);
+      return {
+        skuId: variant.id,
+        sku: variant.sku,
+        warehouseId: stock.warehouseId,
+        warehouseCode: stock.warehouseCode,
+        availableStock: stock.available,
+        reservedStock: stock.reserved,
+        totalStock: stock.quantity,
+        reorderLevel: stock.reorderLevel,
+        // Legacy field for backward compatibility
+        legacyStock: variant.stock,
+      };
+    }
+
+    // Get stock across all warehouses
+    const stockInfo = await this.inventoryStockService.getStockByVariant(skuId);
+
+    // Get active reservations for this SKU (for backward compatibility)
     const activeReservations = await (this.prisma as any).inventoryReservation.count({
       where: {
         skuId,
@@ -467,9 +503,13 @@ export class InventoryService {
     return {
       skuId: variant.id,
       sku: variant.sku,
-      availableStock: variant.stock,
-      reservedStock: activeReservations,
-      totalStock: variant.stock + activeReservations,
+      totalAvailableStock: stockInfo.totalAvailable,
+      totalReservedStock: stockInfo.totalReserved,
+      totalStock: stockInfo.totalQuantity,
+      warehouses: stockInfo.warehouses,
+      // Legacy fields for backward compatibility
+      availableStock: variant.stock, // Deprecated: use totalAvailableStock
+      reservedStock: activeReservations, // Deprecated: use totalReservedStock
     };
   }
 }

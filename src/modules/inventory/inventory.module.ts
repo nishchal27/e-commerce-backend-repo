@@ -23,12 +23,14 @@
 import { Module } from '@nestjs/common';
 import { InventoryController } from './inventory.controller';
 import { InventoryService } from './inventory.service';
+import { InventoryStockService } from './inventory-stock.service';
 import { OptimisticStrategy } from './strategies/optimistic.strategy';
 import { PessimisticStrategy } from './strategies/pessimistic.strategy';
 import { PrismaModule } from '../../lib/prisma/prisma.module';
 import { EventsModule } from '../../common/events/events.module';
 import { PrometheusModule } from '../../common/prometheus/prometheus.module';
 import { ExperimentsModule } from '../experiments/experiments.module';
+import { WarehousesModule } from '../warehouses/warehouses.module';
 
 /**
  * InventoryModule provides inventory management functionality
@@ -43,16 +45,20 @@ import { ExperimentsModule } from '../experiments/experiments.module';
     PrometheusModule,
     // Experiments module for A/B testing
     ExperimentsModule,
+    // Warehouses module for warehouse management
+    WarehousesModule,
   ],
   controllers: [InventoryController],
   providers: [
+    // Inventory stock service for multi-warehouse inventory
+    InventoryStockService,
     // Reservation strategies
     OptimisticStrategy,
     PessimisticStrategy,
     // Inventory service (uses strategies)
     InventoryService,
   ],
-  exports: [InventoryService], // Export service for use in other modules (e.g., Orders, Cart)
+  exports: [InventoryService, InventoryStockService], // Export services for use in other modules
 })
 export class InventoryModule {}
 
