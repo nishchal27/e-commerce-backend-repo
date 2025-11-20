@@ -30,6 +30,7 @@ model User {
   orders       Order[]
   reviews      Review[]
   refreshTokens RefreshToken[] // Refresh tokens for this user (supports multi-device)
+  returns      Return[] // Returns/RMAs initiated by this user
 
   @@map("users")
 }
@@ -58,45 +59,157 @@ enum UserRole {
   MANAGER  // Manager role (future: inventory/order management access)
 }
 
-// Product model - represents a product in the catalog
-// A product can have multiple variants (different sizes, colors, etc.)
-model Product {
+// Gender/Department enum for clothing products
+enum Gender {
+  MEN
+  WOMEN
+  UNISEX
+  KIDS
+  BOYS
+  GIRLS
+}
+
+// Product status enum - soft states for product lifecycle
+enum ProductStatus {
+  DRAFT     // Product is being created/edited
+  PUBLISHED // Product is live and visible to customers
+  ARCHIVED  // Product is hidden but not deleted
+}
+
+// Category model - hierarchical categories for product taxonomy
+model Category {
   id          String   @id @default(uuid())
+  name        String
   slug        String   @unique // SEO-friendly URL slug
-  title       String
   description String?  @db.Text
-  categoryId  String?  // Optional category reference (can be expanded later)
+  parentId    String?  // Self-referential for hierarchical structure
+  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryHierarchy")
+  level       Int      @default(0) // Depth in hierarchy (0 = root)
+  sortOrder   Int      @default(0) // For custom ordering
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
-  variants ProductVariant[]
-  reviews  Review[]
+  products Product[]
+
+  @@index([slug])
+  @@index([parentId])
+  @@index([isActive])
+  @@map("categories")
+}
+
+// Brand model - clothing brands/manufacturers
+model Brand {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique // SEO-friendly URL slug
+  description String?  @db.Text
+  logoUrl     String?  // Brand logo image URL
+  website     String?  // Brand website URL
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  products Product[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@map("brands")
+}
+
+// Collection model - seasonal collections, campaigns, etc.
+model Collection {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique // SEO-friendly URL slug
+  description String?  @db.Text
+  imageUrl    String?  // Collection banner/image URL
+  startDate   DateTime? // Collection start date
+  endDate     DateTime? // Collection end date
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  products Product[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@index([startDate, endDate])
+  @@map("collections")
+}
+
+// Product model - represents a product in the catalog
+// Enhanced for clothing e-commerce with taxonomy, SEO, and soft states
+model Product {
+  id             String        @id @default(uuid())
+  slug           String        @unique // SEO-friendly URL slug
+  title          String
+  description    String?       @db.Text
+  categoryId     String?       // FK to Category
+  brandId        String?       // FK to Brand
+  collectionId   String?       // FK to Collection
+  gender         Gender?       // Gender/department classification
+  status         ProductStatus @default(DRAFT) // Soft state management
+  metaTitle      String?       // SEO meta title
+  metaDescription String?      @db.Text // SEO meta description
+  isActive       Boolean       @default(true) // Soft delete flag
+  deletedAt     DateTime?     // Soft delete timestamp
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Relations
+  category   Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  brand      Brand?           @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  collection Collection?      @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  variants   ProductVariant[]
+  reviews    Review[]
+  media      ProductMedia[]
+  sizeChart  SizeChart?
 
   @@index([slug]) // Index for fast slug lookups
   @@index([categoryId])
+  @@index([brandId])
+  @@index([collectionId])
+  @@index([gender])
+  @@index([status])
+  @@index([isActive])
+  @@index([deletedAt])
   @@map("products")
 }
 
 // Product variant model - represents different SKUs/variants of a product
+// Enhanced for clothing with size, color, and variant-specific images
 // Example: A T-shirt product might have variants for Small/Medium/Large and Red/Blue colors
 model ProductVariant {
   id         String   @id @default(uuid())
   productId  String
-  sku        String   @unique // Stock Keeping Unit (unique identifier for inventory)
-  price      Decimal  @db.Decimal(10, 2) // Price in cents
+  sku        String   @unique // Stock Keeping Unit (globally unique, human-readable: BRAND-STYLE-COLOR-SIZE)
+  price      Decimal  @db.Decimal(10, 2) // Base price in cents
+  compareAtPrice Decimal? @db.Decimal(10, 2) // Original price for showing discounts
   currency   String   @default("USD")
-  attributes Json?    // Flexible JSONB field for variant attributes (size, color, etc.)
-  stock      Int      @default(0)
+  attributes Json?    // Flexible JSONB field for variant attributes (size, color, material, etc.)
+  stock      Int      @default(0) // Legacy: total stock (deprecated in favor of InventoryStock)
+  isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   // Relations
   product             Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
   inventoryReservations InventoryReservation[]
+  inventoryStock      InventoryStock[]         // Multi-warehouse inventory
+  media               VariantMedia[]          // Variant-specific images
+  orderItems          OrderItem[]
+  priceHistory        PriceHistory[]
+  returnItems         ReturnItem[]
 
   @@index([productId])
   @@index([sku])
+  @@index([isActive])
+  // Note: GIN index on attributes JSONB should be added via raw SQL migration for efficient filtering
   @@map("product_variants")
 }
 
@@ -134,19 +247,53 @@ model Order {
   id             String      @id @default(uuid())
   userId         String
   totalAmount    Decimal     @db.Decimal(10, 2)
+  subtotalAmount Decimal     @db.Decimal(10, 2) // Amount before discounts/taxes
+  discountAmount Decimal     @default(0) @db.Decimal(10, 2) // Total discount applied
+  taxAmount      Decimal     @default(0) @db.Decimal(10, 2) // Tax amount
+  shippingAmount Decimal     @default(0) @db.Decimal(10, 2) // Shipping cost
   status         OrderStatus @default(CREATED)
   idempotencyKey String?     @unique // Prevents duplicate order creation
+  promotionCode  String?     // Applied promotion code
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
   // Relations
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  payments Payment[] // Payments associated with this order
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments   Payment[]   // Payments associated with this order
+  items      OrderItem[] // Order line items
+  returns    Return[]    // Returns/RMAs for this order
 
   @@index([userId])
   @@index([status])
   @@index([idempotencyKey])
+  @@index([promotionCode])
   @@map("orders")
+}
+
+// OrderItem model - individual line items in an order
+// Links orders to product variants with quantity and price snapshot
+model OrderItem {
+  id                String   @id @default(uuid())
+  orderId           String
+  variantId         String
+  sku               String   // SKU snapshot at time of order
+  quantity          Int
+  unitPrice         Decimal  @db.Decimal(10, 2) // Price per unit at time of order
+  totalPrice        Decimal  @db.Decimal(10, 2) // Total price (unitPrice * quantity)
+  discountAmount    Decimal  @default(0) @db.Decimal(10, 2) // Discount applied to this item
+  attributes        Json?    // Variant attributes snapshot (size, color, etc.)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  returns ReturnItem[]   // Returns for this order item
+
+  @@index([orderId])
+  @@index([variantId])
+  @@index([sku])
+  @@map("order_items")
 }
 
 // Order status enum
@@ -156,6 +303,28 @@ enum OrderStatus {
   SHIPPED   // Order shipped to customer
   DELIVERED // Order delivered to customer
   CANCELLED // Order cancelled
+  RETURNED  // Order returned by customer
+}
+
+// Return status enum
+enum ReturnStatus {
+  REQUESTED  // Customer requested return
+  APPROVED   // Return approved by admin
+  REJECTED   // Return rejected
+  PROCESSING // Return being processed
+  REFUNDED   // Refund issued
+  COMPLETED  // Return completed
+  CANCELLED  // Return cancelled
+}
+
+// Return reason enum
+enum ReturnReason {
+  DEFECTIVE      // Product is defective
+  WRONG_SIZE     // Wrong size ordered
+  WRONG_ITEM     // Wrong item received
+  NOT_AS_DESCRIBED // Product not as described
+  CHANGED_MIND   // Customer changed mind
+  OTHER          // Other reason
 }
 
 // Review model - customer reviews and ratings for products
@@ -252,5 +421,235 @@ model Outbox {
   @@index([sentAt]) // Index for cleanup of sent events
   @@index([locked]) // Index for finding unlocked events
   @@map("outbox")
+}
+
+// Media model - product and variant images
+model ProductMedia {
+  id        String   @id @default(uuid())
+  productId String
+  url       String   // Image URL
+  alt       String?  // Alt text for accessibility
+  type      String   @default("image") // image, video, etc.
+  position  Int      @default(0) // Sort order for gallery
+  isPrimary Boolean  @default(false) // Primary product image
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([isPrimary])
+  @@map("product_media")
+}
+
+// Variant-specific media (e.g., color swatches, size-specific images)
+model VariantMedia {
+  id        String   @id @default(uuid())
+  variantId String
+  url       String   // Image URL
+  alt       String?  // Alt text
+  type      String   @default("image")
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([variantId])
+  @@map("variant_media")
+}
+
+// Warehouse model - physical warehouse locations
+model Warehouse {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique // Warehouse code (e.g., "WH-NYC-01")
+  address     String?  @db.Text
+  city        String?
+  state       String?
+  country     String?
+  postalCode  String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  inventoryStock InventoryStock[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("warehouses")
+}
+
+// InventoryStock model - multi-warehouse inventory tracking
+// Tracks stock per variant per warehouse location
+model InventoryStock {
+  id          String   @id @default(uuid())
+  variantId   String
+  warehouseId String
+  quantity    Int      @default(0) // Available stock
+  reserved    Int      @default(0) // Reserved stock (in checkout)
+  reorderLevel Int     @default(0) // Minimum stock level before reorder
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, warehouseId]) // One stock record per variant per warehouse
+  @@index([variantId])
+  @@index([warehouseId])
+  @@map("inventory_stock")
+}
+
+// SizeChart model - size measurements mapping for clothing
+model SizeChart {
+  id          String   @id @default(uuid())
+  productId   String   @unique // One size chart per product
+  name        String   // Size chart name (e.g., "US Men's Sizes", "EU Sizes")
+  measurements Json    // JSON structure: { "S": { "chest": "38", "waist": "32", ... }, "M": {...} }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("size_charts")
+}
+
+// Promotion model - promo codes, seasonal discounts, etc.
+model Promotion {
+  id            String      @id @default(uuid())
+  code          String      @unique // Promo code (e.g., "SUMMER20")
+  name          String      // Promotion name
+  description   String?     @db.Text
+  type          String      // "percentage", "fixed_amount", "free_shipping"
+  value         Decimal     @db.Decimal(10, 2) // Discount value (percentage or fixed amount)
+  minPurchase   Decimal?    @db.Decimal(10, 2) // Minimum purchase amount
+  maxDiscount   Decimal?    @db.Decimal(10, 2) // Maximum discount cap
+  startDate     DateTime
+  endDate       DateTime
+  usageLimit    Int?        // Total usage limit (null = unlimited)
+  usageCount    Int         @default(0) // Current usage count
+  isActive      Boolean     @default(true)
+  applicableCategories Json? // Categories this promotion applies to (null = all)
+  applicableBrands     Json? // Brands this promotion applies to (null = all)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+  @@index([startDate, endDate])
+  @@map("promotions")
+}
+
+// PriceHistory model - audit trail for price changes
+model PriceHistory {
+  id        String   @id @default(uuid())
+  variantId String
+  price     Decimal  @db.Decimal(10, 2) // Price at this point in time
+  compareAtPrice Decimal? @db.Decimal(10, 2) // Compare at price
+  reason    String?  // Reason for price change (e.g., "promotion", "cost_change")
+  changedBy String?  // User ID or system identifier who changed the price
+  createdAt DateTime @default(now())
+
+  // Relations
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([variantId])
+  @@index([createdAt])
+  @@map("price_history")
+}
+
+// Supplier model - supplier/vendor information
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  code        String   @unique // Supplier code
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  productCosts ProductCost[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("suppliers")
+}
+
+// ProductCost model - supplier cost data for margin calculation
+model ProductCost {
+  id         String   @id @default(uuid())
+  variantId  String   @unique // One cost record per variant
+  supplierId String?
+  costPrice  Decimal  @db.Decimal(10, 2) // Cost price from supplier
+  currency   String   @default("USD")
+  notes      String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@index([variantId])
+  @@index([supplierId])
+  @@map("product_costs")
+}
+
+// Return model - Return Merchandise Authorization (RMA)
+model Return {
+  id            String       @id @default(uuid())
+  orderId       String
+  userId        String
+  returnNumber  String       @unique // RMA number (e.g., "RMA-2024-001")
+  status        ReturnStatus @default(REQUESTED)
+  reason        ReturnReason
+  reasonDetails String?      @db.Text // Additional details
+  refundAmount  Decimal?     @db.Decimal(10, 2) // Refund amount
+  notes         String?      @db.Text // Admin notes
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Relations
+  order  Order       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  items  ReturnItem[]
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([returnNumber])
+  @@index([status])
+  @@map("returns")
+}
+
+// ReturnItem model - individual items in a return
+model ReturnItem {
+  id          String   @id @default(uuid())
+  returnId    String
+  orderItemId String
+  variantId   String
+  quantity    Int      // Quantity being returned
+  reason      ReturnReason?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  return    Return         @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderItem OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@index([returnId])
+  @@index([orderItemId])
+  @@index([variantId])
+  @@map("return_items")
 }
 

@@ -34,23 +34,33 @@ export class ProductsRepository {
 
   /**
    * Find all products with pagination and optional filtering.
+   * By default, filters out soft-deleted products (isActive = true, deletedAt = null).
    *
    * @param skip - Number of records to skip (for pagination)
    * @param take - Number of records to take (page size)
    * @param where - Optional Prisma where clause for filtering
+   * @param includeDeleted - Whether to include soft-deleted products (default: false)
    * @returns Array of products with variants
    */
   async findAll(
     skip: number = 0,
     take: number = 20,
     where?: any,
+    includeDeleted: boolean = false,
   ): Promise<ProductWithVariants[]> {
+    const whereClause = {
+      ...where,
+      ...(includeDeleted ? {} : { isActive: true, deletedAt: null }),
+    };
+
     return this.prisma.product.findMany({
-      where,
+      where: whereClause,
       skip,
       take,
       include: {
-        variants: true,
+        variants: {
+          where: { isActive: true }, // Only include active variants
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -60,17 +70,28 @@ export class ProductsRepository {
 
   /**
    * Find a product by ID with its variants.
+   * By default, only returns active (non-deleted) products.
    *
    * @param id - Product UUID
+   * @param includeDeleted - Whether to include soft-deleted products (default: false)
    * @returns Product with variants or null if not found
    */
-  async findById(id: string): Promise<ProductWithVariants | null> {
-    return this.prisma.product.findUnique({
+  async findById(id: string, includeDeleted: boolean = false): Promise<ProductWithVariants | null> {
+    const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
-        variants: true,
+        variants: {
+          where: { isActive: true }, // Only include active variants
+        },
       },
     });
+
+    // Filter out soft-deleted products unless explicitly requested
+    if (!includeDeleted && product && (!product.isActive || product.deletedAt)) {
+      return null;
+    }
+
+    return product;
   }
 
   /**
@@ -138,12 +159,30 @@ export class ProductsRepository {
   }
 
   /**
-   * Delete a product and cascade delete its variants.
+   * Soft delete a product (sets isActive = false and deletedAt = now).
+   * This preserves data integrity and allows for recovery.
+   *
+   * @param id - Product UUID
+   * @returns Updated product with soft delete flags set
+   */
+  async delete(id: string): Promise<Prisma.ProductGetPayload<{}>> {
+    return this.prisma.product.update({
+      where: { id },
+      data: {
+        isActive: false,
+        deletedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Hard delete a product (permanently removes from database).
+   * Use with caution - this cannot be undone.
    *
    * @param id - Product UUID
    * @returns Deleted product
    */
-  async delete(id: string): Promise<Prisma.ProductGetPayload<{}>> {
+  async hardDelete(id: string): Promise<Prisma.ProductGetPayload<{}>> {
     return this.prisma.product.delete({
       where: { id },
     });

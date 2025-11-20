@@ -13,16 +13,21 @@
 import { OrderStatus } from '@prisma/client';
 
 /**
- * Order item in response (simplified, without full product details)
+ * Order item in response (from OrderItem model)
  */
 export class OrderItemResponseDto {
   /**
-   * Order item ID (if stored separately, otherwise use order ID + index)
+   * Order item ID
    */
-  id?: string;
+  id: string;
 
   /**
-   * Product variant SKU
+   * Product variant ID
+   */
+  variantId: string;
+
+  /**
+   * Product variant SKU (snapshot at time of order)
    */
   sku: string;
 
@@ -40,6 +45,16 @@ export class OrderItemResponseDto {
    * Total price for this item (unitPrice * quantity)
    */
   totalPrice: number;
+
+  /**
+   * Discount amount applied to this item
+   */
+  discountAmount: number;
+
+  /**
+   * Variant attributes snapshot (size, color, etc.)
+   */
+  attributes: Record<string, any> | null;
 }
 
 /**
@@ -62,9 +77,34 @@ export class OrderResponseDto {
   status: OrderStatus;
 
   /**
-   * Total order amount (sum of all items)
+   * Total order amount (after discounts, taxes, shipping)
    */
   totalAmount: number;
+
+  /**
+   * Subtotal amount (before discounts, taxes, shipping)
+   */
+  subtotalAmount: number;
+
+  /**
+   * Total discount amount applied
+   */
+  discountAmount: number;
+
+  /**
+   * Tax amount
+   */
+  taxAmount: number;
+
+  /**
+   * Shipping amount
+   */
+  shippingAmount: number;
+
+  /**
+   * Promotion code applied (if any)
+   */
+  promotionCode: string | null;
 
   /**
    * Currency code (e.g., "USD")

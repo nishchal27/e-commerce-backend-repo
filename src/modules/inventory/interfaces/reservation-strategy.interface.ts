@@ -54,6 +54,11 @@ export interface ReservationData {
   skuId: string;
 
   /**
+   * Warehouse ID (optional - if not provided, system will select warehouse automatically)
+   */
+  warehouseId?: string;
+
+  /**
    * Quantity to reserve
    */
   quantity: number;

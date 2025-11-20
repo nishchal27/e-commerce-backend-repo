@@ -17,11 +17,15 @@ import { PrismaService } from '../../lib/prisma/prisma.service';
 import { OrderStatus, Prisma } from '@prisma/client';
 
 /**
- * Extended Order type that includes user relation
+ * Extended Order type that includes user and items relations
  * Uses Prisma's generated type for type safety
  */
 export type OrderWithUser = Prisma.OrderGetPayload<{
   include: { user: true };
+}>;
+
+export type OrderWithItems = Prisma.OrderGetPayload<{
+  include: { user: true; items: { include: { variant: true } } };
 }>;
 
 /**
@@ -35,13 +39,22 @@ export class OrdersRepository {
    * Find an order by ID.
    *
    * @param id - Order UUID
-   * @returns Order with user relation or null if not found
+   * @param includeItems - Whether to include order items (default: true)
+   * @returns Order with user and items relations or null if not found
    */
-  async findById(id: string): Promise<OrderWithUser | null> {
+  async findById(id: string, includeItems: boolean = true): Promise<OrderWithItems | OrderWithUser | null> {
     return this.prisma.order.findUnique({
       where: { id },
       include: {
         user: true,
+        items: includeItems ? {
+          include: {
+            variant: true,
+          },
+          orderBy: {
+            createdAt: 'asc',
+          },
+        } : false,
       },
     });
   }
@@ -53,11 +66,13 @@ export class OrdersRepository {
    * Prevents duplicate order creation on retries.
    *
    * @param idempotencyKey - Idempotency key
+   * @param includeItems - Whether to include order items (default: true)
    * @returns Order or null if not found
    */
   async findByIdempotencyKey(
     idempotencyKey: string,
-  ): Promise<OrderWithUser | null> {
+    includeItems: boolean = true,
+  ): Promise<OrderWithItems | OrderWithUser | null> {
     if (!idempotencyKey) {
       return null;
     }
@@ -66,6 +81,14 @@ export class OrdersRepository {
       where: { idempotencyKey },
       include: {
         user: true,
+        items: includeItems ? {
+          include: {
+            variant: true,
+          },
+          orderBy: {
+            createdAt: 'asc',
+          },
+        } : false,
       },
     });
   }
@@ -76,19 +99,29 @@ export class OrdersRepository {
    * @param userId - User UUID
    * @param skip - Number of records to skip (for pagination)
    * @param take - Number of records to take (page size)
-   * @returns Array of orders with user relation
+   * @param includeItems - Whether to include order items (default: true)
+   * @returns Array of orders with user and items relations
    */
   async findByUserId(
     userId: string,
     skip: number = 0,
     take: number = 20,
-  ): Promise<OrderWithUser[]> {
+    includeItems: boolean = true,
+  ): Promise<OrderWithItems[] | OrderWithUser[]> {
     return this.prisma.order.findMany({
       where: { userId },
       skip,
       take,
       include: {
         user: true,
+        items: includeItems ? {
+          include: {
+            variant: true,
+          },
+          orderBy: {
+            createdAt: 'asc',
+          },
+        } : false,
       },
       orderBy: {
         createdAt: 'desc',
@@ -128,18 +161,41 @@ export class OrdersRepository {
    * Create a new order.
    *
    * @param data - Order creation data
-   * @returns Created order with user relation
+   * @returns Created order with user and items relations
    */
   async create(data: {
     userId: string;
     totalAmount: number;
+    subtotalAmount: number;
+    discountAmount?: number;
+    taxAmount?: number;
+    shippingAmount?: number;
     status: OrderStatus;
     idempotencyKey?: string;
-  }): Promise<OrderWithUser> {
+    promotionCode?: string;
+  }): Promise<OrderWithItems> {
     return this.prisma.order.create({
-      data,
+      data: {
+        userId: data.userId,
+        totalAmount: data.totalAmount,
+        subtotalAmount: data.subtotalAmount,
+        discountAmount: data.discountAmount ?? 0,
+        taxAmount: data.taxAmount ?? 0,
+        shippingAmount: data.shippingAmount ?? 0,
+        status: data.status,
+        idempotencyKey: data.idempotencyKey,
+        promotionCode: data.promotionCode,
+      },
       include: {
         user: true,
+        items: {
+          include: {
+            variant: true,
+          },
+          orderBy: {
+            createdAt: 'asc',
+          },
+        },
       },
     });
   }

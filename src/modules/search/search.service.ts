@@ -19,7 +19,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../lib/prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
-import { SearchResult, SearchResponse } from './interfaces/search-result.interface';
+import { SearchResult, SearchResponse, SearchFacets } from './interfaces/search-result.interface';
 import { PrometheusService } from '../../common/prometheus/prometheus.service';
 import { OutboxService } from '../../common/events/outbox.service';
 import { Logger } from '../../lib/logger';
@@ -55,33 +55,110 @@ export class SearchService {
 
     try {
       // Build where clause for filtering
-      const where: Prisma.ProductWhereInput = {};
+      const where: Prisma.ProductWhereInput = {
+        isActive: true,
+        deletedAt: null,
+      };
 
       // Apply filters
       if (filters?.categoryId) {
         where.categoryId = filters.categoryId;
       }
 
+      if (filters?.brandId) {
+        where.brandId = filters.brandId;
+      }
+
+      if (filters?.gender) {
+        where.gender = filters.gender as any;
+      }
+
+      // Build variant filters
+      const variantFilters: Prisma.ProductVariantWhereInput = {
+        isActive: true,
+      };
+
       if (filters?.inStock !== undefined) {
-        where.variants = {
-          some: {
-            stock: filters.inStock ? { gt: 0 } : { lte: 0 },
-          },
+        // Check both legacy stock field and InventoryStock
+        if (filters.inStock) {
+          variantFilters.OR = [
+            { stock: { gt: 0 } },
+            {
+              inventoryStock: {
+                some: {
+                  quantity: { gt: 0 },
+                },
+              },
+            },
+          ];
+        } else {
+          variantFilters.AND = [
+            { stock: { lte: 0 } },
+            {
+              OR: [
+                { inventoryStock: { none: {} } },
+                {
+                  inventoryStock: {
+                    every: {
+                      quantity: { lte: 0 },
+                    },
+                  },
+                },
+              ],
+            },
+          ];
+        }
+      }
+
+      // Price filtering
+      if (filters?.minPrice !== undefined || filters?.maxPrice !== undefined) {
+        variantFilters.price = {
+          ...(filters.minPrice !== undefined && {
+            gte: new Prisma.Decimal(filters.minPrice),
+          }),
+          ...(filters.maxPrice !== undefined && {
+            lte: new Prisma.Decimal(filters.maxPrice),
+          }),
         };
       }
 
-      // Price filtering (if provided)
-      if (filters?.minPrice !== undefined || filters?.maxPrice !== undefined) {
-        where.variants = {
-          ...where.variants,
-          some: {
-            ...(filters.minPrice !== undefined && {
-              price: { gte: new Prisma.Decimal(filters.minPrice) },
-            }),
-            ...(filters.maxPrice !== undefined && {
-              price: { lte: new Prisma.Decimal(filters.maxPrice) },
-            }),
+      // Size filter - using JSONB attributes with GIN index
+      // Prisma JSONB filtering: attributes->>'size' IN (sizes)
+      if (filters?.sizes && filters.sizes.length > 0) {
+        // Use raw SQL for JSONB filtering with GIN index
+        // For now, use Prisma's JSON filtering (may need raw SQL for optimal performance)
+        variantFilters.AND = [
+          ...(variantFilters.AND || []),
+          {
+            OR: filters.sizes.map((size) => ({
+              attributes: {
+                path: ['size'],
+                equals: size,
+              },
+            })),
           },
+        ];
+      }
+
+      // Color filter - using JSONB attributes with GIN index
+      if (filters?.colors && filters.colors.length > 0) {
+        variantFilters.AND = [
+          ...(variantFilters.AND || []),
+          {
+            OR: filters.colors.map((color) => ({
+              attributes: {
+                path: ['color'],
+                equals: color,
+              },
+            })),
+          },
+        ];
+      }
+
+      // Apply variant filters to product where clause
+      if (Object.keys(variantFilters).length > 0) {
+        where.variants = {
+          some: variantFilters,
         };
       }
 
@@ -175,6 +252,9 @@ export class SearchService {
         'SearchService',
       );
 
+      // Calculate facets (available filter options with counts)
+      const facets = await this.calculateFacets(where, variantFilters);
+
       return {
         results,
         total,
@@ -183,6 +263,7 @@ export class SearchService {
         totalPages: Math.ceil(total / limit),
         query: q || '',
         filters: filters || undefined,
+        facets,
       };
     } catch (error: any) {
       const latency = Date.now() - startTime;
@@ -196,6 +277,176 @@ export class SearchService {
     }
   }
 
+  /**
+   * Calculate facets (available filter options with counts).
+   * This helps users see what filters are available and how many results each would return.
+   *
+   * @param baseWhere - Base product where clause (without variant filters)
+   * @param variantFilters - Variant filters to apply
+   * @returns Facets with counts
+   */
+  private async calculateFacets(
+    baseWhere: Prisma.ProductWhereInput,
+    variantFilters: Prisma.ProductVariantWhereInput,
+  ): Promise<SearchFacets> {
+    const facets: SearchFacets = {};
+
+    try {
+      // Get all products matching base filters (for category/brand/gender facets)
+      const baseProducts = await this.prisma.product.findMany({
+        where: baseWhere,
+        select: {
+          id: true,
+          categoryId: true,
+          brandId: true,
+          gender: true,
+        },
+      });
+
+      // Category facets
+      const categoryCounts = new Map<string, number>();
+      for (const product of baseProducts) {
+        if (product.categoryId) {
+          categoryCounts.set(product.categoryId, (categoryCounts.get(product.categoryId) || 0) + 1);
+        }
+      }
+
+      if (categoryCounts.size > 0) {
+        const categoryIds = Array.from(categoryCounts.keys());
+        const categories = await this.prisma.category.findMany({
+          where: { id: { in: categoryIds } },
+          select: { id: true, name: true },
+        });
+
+        facets.categories = categories.map((cat) => ({
+          id: cat.id,
+          name: cat.name,
+          count: categoryCounts.get(cat.id) || 0,
+        }));
+      }
+
+      // Brand facets
+      const brandCounts = new Map<string, number>();
+      for (const product of baseProducts) {
+        if (product.brandId) {
+          brandCounts.set(product.brandId, (brandCounts.get(product.brandId) || 0) + 1);
+        }
+      }
+
+      if (brandCounts.size > 0) {
+        const brandIds = Array.from(brandCounts.keys());
+        const brands = await this.prisma.brand.findMany({
+          where: { id: { in: brandIds } },
+          select: { id: true, name: true },
+        });
+
+        facets.brands = brands.map((brand) => ({
+          id: brand.id,
+          name: brand.name,
+          count: brandCounts.get(brand.id) || 0,
+        }));
+      }
+
+      // Gender facets
+      const genderCounts = new Map<string, number>();
+      for (const product of baseProducts) {
+        if (product.gender) {
+          genderCounts.set(product.gender, (genderCounts.get(product.gender) || 0) + 1);
+        }
+      }
+
+      if (genderCounts.size > 0) {
+        facets.genders = Array.from(genderCounts.entries()).map(([value, count]) => ({
+          value,
+          count,
+        }));
+      }
+
+      // Size and color facets - from variant attributes
+      const productIds = baseProducts.map((p) => p.id);
+      const variants = await this.prisma.productVariant.findMany({
+        where: {
+          productId: { in: productIds },
+          ...variantFilters,
+        },
+        select: {
+          attributes: true,
+        },
+      });
+
+      // Size facets
+      const sizeCounts = new Map<string, number>();
+      for (const variant of variants) {
+        if (variant.attributes && typeof variant.attributes === 'object') {
+          const attrs = variant.attributes as Record<string, any>;
+          const size = attrs.size;
+          if (size) {
+            sizeCounts.set(String(size), (sizeCounts.get(String(size)) || 0) + 1);
+          }
+        }
+      }
+
+      if (sizeCounts.size > 0) {
+        facets.sizes = Array.from(sizeCounts.entries())
+          .map(([value, count]) => ({ value, count }))
+          .sort((a, b) => a.value.localeCompare(b.value));
+      }
+
+      // Color facets
+      const colorCounts = new Map<string, number>();
+      for (const variant of variants) {
+        if (variant.attributes && typeof variant.attributes === 'object') {
+          const attrs = variant.attributes as Record<string, any>;
+          const color = attrs.color;
+          if (color) {
+            colorCounts.set(String(color), (colorCounts.get(String(color)) || 0) + 1);
+          }
+        }
+      }
+
+      if (colorCounts.size > 0) {
+        facets.colors = Array.from(colorCounts.entries()).map(([value, count]) => ({
+          value,
+          count,
+        }));
+      }
+
+      // Price range
+      if (variants.length > 0) {
+        const prices = variants
+          .map((v) => {
+            // Get price from variant (need to fetch full variant for price)
+            return null; // Will be calculated separately
+          })
+          .filter((p): p is number => p !== null);
+
+        if (prices.length > 0) {
+          const priceVariants = await this.prisma.productVariant.findMany({
+            where: {
+              productId: { in: productIds },
+              ...variantFilters,
+            },
+            select: {
+              price: true,
+            },
+          });
+
+          const priceValues = priceVariants.map((v) => Number(v.price));
+          if (priceValues.length > 0) {
+            facets.priceRange = {
+              min: Math.min(...priceValues),
+              max: Math.max(...priceValues),
+            };
+          }
+        }
+      }
+    } catch (error: any) {
+      // Don't fail search if facets calculation fails
+      this.logger.warn(`Failed to calculate facets: ${error.message}`, 'SearchService');
+    }
+
+    return facets;
+  }
 
   /**
    * Record search query for analytics.

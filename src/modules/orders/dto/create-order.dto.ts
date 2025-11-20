@@ -81,5 +81,13 @@ export class CreateOrderDto {
   @IsString()
   @IsOptional()
   idempotencyKey?: string;
+
+  /**
+   * Promotion code to apply to the order
+   * Optional discount code
+   */
+  @IsString()
+  @IsOptional()
+  promotionCode?: string;
 }
 

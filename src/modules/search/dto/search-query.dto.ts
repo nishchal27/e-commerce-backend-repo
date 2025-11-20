@@ -21,6 +21,14 @@ export class SearchFiltersDto {
   @IsOptional()
   categoryId?: string;
 
+  @IsString()
+  @IsOptional()
+  brandId?: string;
+
+  @IsString()
+  @IsOptional()
+  gender?: string; // "men", "women", "unisex", "kids"
+
   @IsNumber()
   @Min(0)
   @IsOptional()
@@ -34,6 +42,16 @@ export class SearchFiltersDto {
   @IsBoolean()
   @IsOptional()
   inStock?: boolean;
+
+  // Size filter - array of sizes (e.g., ["S", "M", "L"])
+  @IsString({ each: true })
+  @IsOptional()
+  sizes?: string[];
+
+  // Color filter - array of colors (e.g., ["red", "blue"])
+  @IsString({ each: true })
+  @IsOptional()
+  colors?: string[];
 
   @IsObject()
   @IsOptional()

@@ -38,6 +38,14 @@ export class ReserveInventoryDto {
   skuId: string;
 
   /**
+   * Warehouse ID (optional - if not provided, system will select warehouse automatically)
+   * Must be a valid UUID of an existing Warehouse
+   */
+  @IsUUID()
+  @IsOptional()
+  warehouseId?: string;
+
+  /**
    * Quantity to reserve
    * Must be at least 1
    */

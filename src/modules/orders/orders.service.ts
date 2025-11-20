@@ -26,7 +26,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../lib/prisma/prisma.service';
-import { OrdersRepository } from './orders.repository';
+import { OrdersRepository, OrderWithItems } from './orders.repository';
 import { OutboxService } from '../../common/events/outbox.service';
 import { PrometheusService } from '../../common/prometheus/prometheus.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -41,13 +41,16 @@ import { Logger } from '../../lib/logger';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
- * Order item with calculated price
+ * Order item with calculated price and variant info
  */
 interface OrderItemWithPrice {
+  variantId: string;
   sku: string;
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  discountAmount?: number;
+  attributes?: Record<string, any>;
 }
 
 /**
@@ -93,28 +96,36 @@ export class OrdersService {
     if (idempotencyKey) {
       const existingOrder = await this.ordersRepository.findByIdempotencyKey(
         idempotencyKey,
+        true,
       );
 
-      if (existingOrder) {
+      if (existingOrder && 'items' in existingOrder) {
         this.logger.debug(
           `Order with idempotency key ${idempotencyKey} already exists: ${existingOrder.id}`,
           'OrdersService',
         );
         // Return existing order (idempotent behavior)
-        return this.mapToResponseDto(existingOrder, []);
+        return this.mapToResponseDto(existingOrder as OrderWithItems);
       }
     }
 
     // Validate and calculate prices for order items
     const orderItemsWithPrice = await this.validateAndCalculatePrices(items);
 
-    // Calculate total amount
-    const totalAmount = orderItemsWithPrice.reduce(
+    // Calculate amounts
+    const subtotalAmount = orderItemsWithPrice.reduce(
       (sum, item) => sum + item.totalPrice,
       0,
     );
+    const discountAmount = orderItemsWithPrice.reduce(
+      (sum, item) => sum + (item.discountAmount || 0),
+      0,
+    );
+    const taxAmount = 0; // TODO: Calculate tax based on location
+    const shippingAmount = 0; // TODO: Calculate shipping based on order
+    const totalAmount = subtotalAmount - discountAmount + taxAmount + shippingAmount;
 
-    // Create order in transaction (with event emission)
+    // Create order in transaction (with order items and event emission)
     const order = await this.prisma.$transaction(async (tx) => {
       // Create order
       const newOrder = await tx.order.create({
@@ -122,11 +133,32 @@ export class OrdersService {
           id: uuidv4(),
           userId,
           totalAmount,
+          subtotalAmount,
+          discountAmount,
+          taxAmount,
+          shippingAmount,
           status: OrderStatus.CREATED,
           idempotencyKey: idempotencyKey || null,
+          promotionCode: createOrderDto.promotionCode || null,
+          items: {
+            create: orderItemsWithPrice.map((item) => ({
+              variantId: item.variantId,
+              sku: item.sku,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              totalPrice: item.totalPrice,
+              discountAmount: item.discountAmount || 0,
+              attributes: item.attributes || null,
+            })),
+          },
         },
         include: {
           user: true,
+          items: {
+            include: {
+              variant: true,
+            },
+          },
         },
       });
 
@@ -141,10 +173,12 @@ export class OrdersService {
             total_amount: Number(newOrder.totalAmount),
             currency: 'USD', // TODO: Get from product variant
             items: orderItemsWithPrice.map((item) => ({
+              variant_id: item.variantId,
               sku: item.sku,
               quantity: item.quantity,
               unit_price: item.unitPrice,
               total_price: item.totalPrice,
+              discount_amount: item.discountAmount || 0,
             })),
             idempotency_key: idempotencyKey,
           },
@@ -169,7 +203,7 @@ export class OrdersService {
     );
 
     // Map to response DTO
-    return this.mapToResponseDto(order, orderItemsWithPrice);
+    return this.mapToResponseDto(order as OrderWithItems);
   }
 
   /**
@@ -180,15 +214,17 @@ export class OrdersService {
    * @throws NotFoundException if order not found
    */
   async findOne(id: string): Promise<OrderResponseDto> {
-    const order = await this.ordersRepository.findById(id);
+    const order = await this.ordersRepository.findById(id, true);
 
     if (!order) {
       throw new NotFoundException(`Order with ID ${id} not found`);
     }
 
-    // TODO: Fetch order items from separate table or include in order
-    // For now, return order without items (items would be stored separately)
-    return this.mapToResponseDto(order, []);
+    if (!('items' in order)) {
+      throw new NotFoundException(`Order with ID ${id} not found`);
+    }
+
+    return this.mapToResponseDto(order as OrderWithItems);
   }
 
   /**
@@ -219,7 +255,13 @@ export class OrdersService {
     ]);
 
     return {
-      data: orders.map((order) => this.mapToResponseDto(order, [])),
+      data: orders.map((order) => {
+        if ('items' in order) {
+          return this.mapToResponseDto(order as OrderWithItems);
+        }
+        // Fallback for orders without items (shouldn't happen, but type safety)
+        return this.mapToResponseDto(order as any);
+      }),
       pagination: {
         page,
         limit,
@@ -311,7 +353,13 @@ export class OrdersService {
       'OrdersService',
     );
 
-    return this.mapToResponseDto(updatedOrder, []);
+    // Fetch order with items for response
+    const orderWithItems = await this.ordersRepository.findById(id, true);
+    if (!orderWithItems || !('items' in orderWithItems)) {
+      throw new NotFoundException(`Order with ID ${id} not found`);
+    }
+
+    return this.mapToResponseDto(orderWithItems as OrderWithItems);
   }
 
   /**
@@ -366,10 +414,13 @@ export class OrdersService {
       const totalPrice = unitPrice * item.quantity;
 
       orderItemsWithPrice.push({
+        variantId: variant.id,
         sku: item.sku,
         quantity: item.quantity,
         unitPrice,
         totalPrice,
+        discountAmount: 0, // TODO: Calculate discount from promotion
+        attributes: variant.attributes as Record<string, any> | undefined,
       });
     }
 
@@ -379,28 +430,38 @@ export class OrdersService {
   /**
    * Map order entity to response DTO.
    *
-   * @param order - Order entity from database
-   * @param items - Order items with prices (if available)
+   * @param order - Order entity from database with items
    * @returns Order response DTO
    */
-  private mapToResponseDto(
-    order: any,
-    items: OrderItemWithPrice[],
-  ): OrderResponseDto {
+  private mapToResponseDto(order: OrderWithItems): OrderResponseDto {
     // Map items to response format
-    const orderItems: OrderItemResponseDto[] = items.map((item) => ({
+    const orderItems: OrderItemResponseDto[] = order.items.map((item) => ({
+      id: item.id,
+      variantId: item.variantId,
       sku: item.sku,
       quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      totalPrice: item.totalPrice,
+      unitPrice: Number(item.unitPrice),
+      totalPrice: Number(item.totalPrice),
+      discountAmount: Number(item.discountAmount),
+      attributes: item.attributes as Record<string, any> | null,
     }));
+
+    // Get currency from first item's variant, or default to USD
+    const currency = order.items.length > 0 && order.items[0].variant
+      ? order.items[0].variant.currency
+      : 'USD';
 
     return {
       id: order.id,
       userId: order.userId,
       status: order.status,
       totalAmount: Number(order.totalAmount),
-      currency: 'USD', // TODO: Get from order or product variant
+      subtotalAmount: Number(order.subtotalAmount),
+      discountAmount: Number(order.discountAmount),
+      taxAmount: Number(order.taxAmount),
+      shippingAmount: Number(order.shippingAmount),
+      promotionCode: order.promotionCode,
+      currency,
       items: orderItems,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
