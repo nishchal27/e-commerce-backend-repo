@@ -182,7 +182,21 @@ export class SuppliersService {
       throw new NotFoundException(`Product variant with ID ${variantId} not found`);
     }
 
-    return this.suppliersRepository.findProductCostByVariantId(variantId);
+    const cost = await this.suppliersRepository.findProductCostByVariantId(variantId);
+    if (!cost) {
+      return null;
+    }
+
+    return {
+      id: cost.id,
+      variantId: cost.variantId,
+      supplierId: cost.supplierId,
+      costPrice: Number(cost.costPrice),
+      currency: cost.currency,
+      notes: cost.notes,
+      createdAt: cost.createdAt,
+      updatedAt: cost.updatedAt,
+    };
   }
 
   /**
@@ -216,7 +230,16 @@ export class SuppliersService {
       'SuppliersService',
     );
 
-    return cost;
+    return {
+      id: cost.id,
+      variantId: cost.variantId,
+      supplierId: cost.supplierId,
+      costPrice: Number(cost.costPrice),
+      currency: cost.currency,
+      notes: cost.notes,
+      createdAt: cost.createdAt,
+      updatedAt: cost.updatedAt,
+    };
   }
 
   /**

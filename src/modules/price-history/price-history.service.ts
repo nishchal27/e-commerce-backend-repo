@@ -41,7 +41,12 @@ export class PriceHistoryService {
       throw new NotFoundException(`Product variant with ID ${variantId} not found`);
     }
 
-    return this.priceHistoryRepository.findByVariantId(variantId, limit);
+    const histories = await this.priceHistoryRepository.findByVariantId(variantId, limit);
+    return histories.map((h) => ({
+      ...h,
+      price: Number(h.price),
+      compareAtPrice: h.compareAtPrice ? Number(h.compareAtPrice) : null,
+    }));
   }
 
   /**
@@ -51,7 +56,15 @@ export class PriceHistoryService {
    * @returns Latest price history or null
    */
   async getLatestByVariantId(variantId: string): Promise<PriceHistoryResponseDto | null> {
-    return this.priceHistoryRepository.findLatestByVariantId(variantId);
+    const history = await this.priceHistoryRepository.findLatestByVariantId(variantId);
+    if (!history) {
+      return null;
+    }
+    return {
+      ...history,
+      price: Number(history.price),
+      compareAtPrice: history.compareAtPrice ? Number(history.compareAtPrice) : null,
+    };
   }
 
   /**
@@ -78,7 +91,11 @@ export class PriceHistoryService {
       'PriceHistoryService',
     );
 
-    return priceHistory;
+    return {
+      ...priceHistory,
+      price: Number(priceHistory.price),
+      compareAtPrice: priceHistory.compareAtPrice ? Number(priceHistory.compareAtPrice) : null,
+    };
   }
 
   /**
@@ -102,7 +119,7 @@ export class PriceHistoryService {
     return this.create({
       variantId,
       price: newPrice,
-      compareAtPrice: newCompareAtPrice,
+      compareAtPrice: newCompareAtPrice ?? undefined,
       reason: reason || 'price_update',
       changedBy,
     });

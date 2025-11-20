@@ -223,6 +223,12 @@ export class ReturnsService {
 
     this.logger.log(`Return created: ${return_.id} (${returnNumber})`, 'ReturnsService');
 
+    // Fetch complete return with relations
+    const completeReturn = await this.returnsRepository.findById(return_.id);
+    if (!completeReturn) {
+      throw new NotFoundException('Failed to retrieve created return');
+    }
+
     return this.mapToResponseDto(completeReturn);
   }
 

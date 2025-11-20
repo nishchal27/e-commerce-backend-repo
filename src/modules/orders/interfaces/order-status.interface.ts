@@ -28,6 +28,7 @@ export const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   SHIPPED: [OrderStatus.DELIVERED],
   DELIVERED: [], // Terminal state - no transitions allowed
   CANCELLED: [], // Terminal state - no transitions allowed
+  RETURNED: [], // Terminal state - no transitions allowed
 };
 
 /**

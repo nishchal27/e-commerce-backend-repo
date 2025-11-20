@@ -32,7 +32,7 @@ import { PrometheusService } from '../../common/prometheus/prometheus.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { OrderResponseDto, OrderItemResponseDto } from './dto/order-response.dto';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, Prisma } from '@prisma/client';
 import {
   isValidStatusTransition,
   isTerminalStatus,
@@ -142,13 +142,15 @@ export class OrdersService {
           promotionCode: createOrderDto.promotionCode || null,
           items: {
             create: orderItemsWithPrice.map((item) => ({
-              variantId: item.variantId,
+              variant: {
+                connect: { id: item.variantId },
+              },
               sku: item.sku,
               quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              totalPrice: item.totalPrice,
-              discountAmount: item.discountAmount || 0,
-              attributes: item.attributes || null,
+              unitPrice: new Prisma.Decimal(item.unitPrice),
+              totalPrice: new Prisma.Decimal(item.totalPrice),
+              discountAmount: new Prisma.Decimal(item.discountAmount || 0),
+              attributes: item.attributes || Prisma.JsonNull,
             })),
           },
         },

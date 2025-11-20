@@ -157,9 +157,10 @@ export class InventoryService {
     const subjectId = userId || sessionId || reservedBy;
 
     // If warehouse not specified, find available warehouse
-    let selectedWarehouseId = warehouseId;
+    let selectedWarehouseId: string | undefined = warehouseId;
     if (!selectedWarehouseId) {
-      selectedWarehouseId = await this.inventoryStockService.findAvailableWarehouse(skuId, quantity);
+      const foundWarehouseId = await this.inventoryStockService.findAvailableWarehouse(skuId, quantity);
+      selectedWarehouseId = foundWarehouseId || undefined;
       if (!selectedWarehouseId) {
         throw new BadRequestException(
           `No warehouse has sufficient stock for variant ${skuId} (quantity: ${quantity})`,
