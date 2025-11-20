@@ -40,7 +40,17 @@ export class SizeChartsService {
     }
 
     const sizeChart = await this.sizeChartsRepository.findByProductId(productId);
-    return sizeChart;
+    if (!sizeChart) {
+      return null;
+    }
+    return {
+      id: sizeChart.id,
+      productId: sizeChart.productId,
+      name: sizeChart.name,
+      measurements: (sizeChart.measurements as Record<string, any>) || {},
+      createdAt: sizeChart.createdAt,
+      updatedAt: sizeChart.updatedAt,
+    };
   }
 
   /**
@@ -57,7 +67,14 @@ export class SizeChartsService {
       throw new NotFoundException(`Size chart with ID ${id} not found`);
     }
 
-    return sizeChart;
+    return {
+      id: sizeChart.id,
+      productId: sizeChart.productId,
+      name: sizeChart.name,
+      measurements: (sizeChart.measurements as Record<string, any>) || {},
+      createdAt: sizeChart.createdAt,
+      updatedAt: sizeChart.updatedAt,
+    };
   }
 
   /**
@@ -90,7 +107,14 @@ export class SizeChartsService {
     const sizeChart = await this.sizeChartsRepository.create(createSizeChartDto);
     this.logger.log(`Size chart created: ${sizeChart.id} for product ${createSizeChartDto.productId}`, 'SizeChartsService');
 
-    return sizeChart;
+    return {
+      id: sizeChart.id,
+      productId: sizeChart.productId,
+      name: sizeChart.name,
+      measurements: (sizeChart.measurements as Record<string, any>) || {},
+      createdAt: sizeChart.createdAt,
+      updatedAt: sizeChart.updatedAt,
+    };
   }
 
   /**
@@ -115,7 +139,14 @@ export class SizeChartsService {
     const sizeChart = await this.sizeChartsRepository.update(id, updateSizeChartDto);
     this.logger.log(`Size chart updated: ${id}`, 'SizeChartsService');
 
-    return sizeChart;
+    return {
+      id: sizeChart.id,
+      productId: sizeChart.productId,
+      name: sizeChart.name,
+      measurements: (sizeChart.measurements as Record<string, any>) || {},
+      createdAt: sizeChart.createdAt,
+      updatedAt: sizeChart.updatedAt,
+    };
   }
 
   /**

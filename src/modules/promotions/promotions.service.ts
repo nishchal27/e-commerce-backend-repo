@@ -36,6 +36,9 @@ export class PromotionsService {
       const isValid = this.promotionsRepository.isPromotionValid(promo);
       return {
         ...promo,
+        value: Number(promo.value),
+        minPurchase: promo.minPurchase ? Number(promo.minPurchase) : null,
+        maxDiscount: promo.maxDiscount ? Number(promo.maxDiscount) : null,
         applicableCategories: promo.applicableCategories as string[] | null,
         applicableBrands: promo.applicableBrands as string[] | null,
         isValid,
@@ -61,6 +64,9 @@ export class PromotionsService {
 
     return {
       ...promotion,
+      value: Number(promotion.value),
+      minPurchase: promotion.minPurchase ? Number(promotion.minPurchase) : null,
+      maxDiscount: promotion.maxDiscount ? Number(promotion.maxDiscount) : null,
       applicableCategories: promotion.applicableCategories as string[] | null,
       applicableBrands: promotion.applicableBrands as string[] | null,
       isValid,
@@ -85,6 +91,9 @@ export class PromotionsService {
 
     return {
       ...promotion,
+      value: Number(promotion.value),
+      minPurchase: promotion.minPurchase ? Number(promotion.minPurchase) : null,
+      maxDiscount: promotion.maxDiscount ? Number(promotion.maxDiscount) : null,
       applicableCategories: promotion.applicableCategories as string[] | null,
       applicableBrands: promotion.applicableBrands as string[] | null,
       isValid,
@@ -159,6 +168,9 @@ export class PromotionsService {
 
     return {
       ...promotion,
+      value: Number(promotion.value),
+      minPurchase: promotion.minPurchase ? Number(promotion.minPurchase) : null,
+      maxDiscount: promotion.maxDiscount ? Number(promotion.maxDiscount) : null,
       applicableCategories: promotion.applicableCategories as string[] | null,
       applicableBrands: promotion.applicableBrands as string[] | null,
       isValid: true,
@@ -200,6 +212,9 @@ export class PromotionsService {
 
     return {
       ...promotion,
+      value: Number(promotion.value),
+      minPurchase: promotion.minPurchase ? Number(promotion.minPurchase) : null,
+      maxDiscount: promotion.maxDiscount ? Number(promotion.maxDiscount) : null,
       applicableCategories: promotion.applicableCategories as string[] | null,
       applicableBrands: promotion.applicableBrands as string[] | null,
       isValid,
@@ -251,6 +266,9 @@ export class PromotionsService {
 
     return {
       ...promotion,
+      value: Number(promotion.value),
+      minPurchase: promotion.minPurchase ? Number(promotion.minPurchase) : null,
+      maxDiscount: promotion.maxDiscount ? Number(promotion.maxDiscount) : null,
       applicableCategories: promotion.applicableCategories as string[] | null,
       applicableBrands: promotion.applicableBrands as string[] | null,
       isValid,

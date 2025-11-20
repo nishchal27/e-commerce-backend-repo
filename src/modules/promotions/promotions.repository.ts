@@ -81,8 +81,8 @@ export class PromotionsRepository {
         code: data.code.toUpperCase(), // Normalize to uppercase
         startDate: new Date(data.startDate),
         endDate: new Date(data.endDate),
-        applicableCategories: data.applicableCategories ? data.applicableCategories : null,
-        applicableBrands: data.applicableBrands ? data.applicableBrands : null,
+        applicableCategories: data.applicableCategories || Prisma.JsonNull,
+        applicableBrands: data.applicableBrands || Prisma.JsonNull,
       },
     });
   }
@@ -107,10 +107,10 @@ export class PromotionsRepository {
       updateData.endDate = new Date(data.endDate);
     }
     if (data.applicableCategories !== undefined) {
-      updateData.applicableCategories = data.applicableCategories || null;
+      updateData.applicableCategories = data.applicableCategories || Prisma.JsonNull;
     }
     if (data.applicableBrands !== undefined) {
-      updateData.applicableBrands = data.applicableBrands || null;
+      updateData.applicableBrands = data.applicableBrands || Prisma.JsonNull;
     }
 
     return this.prisma.promotion.update({

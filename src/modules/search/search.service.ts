@@ -125,10 +125,13 @@ export class SearchService {
       // Size filter - using JSONB attributes with GIN index
       // Prisma JSONB filtering: attributes->>'size' IN (sizes)
       if (filters?.sizes && filters.sizes.length > 0) {
-        // Use raw SQL for JSONB filtering with GIN index
-        // For now, use Prisma's JSON filtering (may need raw SQL for optimal performance)
+        const existingAnd = variantFilters.AND
+          ? Array.isArray(variantFilters.AND)
+            ? variantFilters.AND
+            : [variantFilters.AND]
+          : [];
         variantFilters.AND = [
-          ...(variantFilters.AND || []),
+          ...existingAnd,
           {
             OR: filters.sizes.map((size) => ({
               attributes: {
@@ -142,8 +145,13 @@ export class SearchService {
 
       // Color filter - using JSONB attributes with GIN index
       if (filters?.colors && filters.colors.length > 0) {
+        const existingAnd = variantFilters.AND
+          ? Array.isArray(variantFilters.AND)
+            ? variantFilters.AND
+            : [variantFilters.AND]
+          : [];
         variantFilters.AND = [
-          ...(variantFilters.AND || []),
+          ...existingAnd,
           {
             OR: filters.colors.map((color) => ({
               attributes: {
@@ -413,14 +421,6 @@ export class SearchService {
 
       // Price range
       if (variants.length > 0) {
-        const prices = variants
-          .map((v) => {
-            // Get price from variant (need to fetch full variant for price)
-            return null; // Will be calculated separately
-          })
-          .filter((p): p is number => p !== null);
-
-        if (prices.length > 0) {
           const priceVariants = await this.prisma.productVariant.findMany({
             where: {
               productId: { in: productIds },
@@ -439,7 +439,6 @@ export class SearchService {
             };
           }
         }
-      }
     } catch (error: any) {
       // Don't fail search if facets calculation fails
       this.logger.warn(`Failed to calculate facets: ${error.message}`, 'SearchService');
